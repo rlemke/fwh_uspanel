@@ -52,6 +52,16 @@ NCHS_CAUSES = {
     "Diabetes": "diabetes_death_rate",
     "Stroke": "stroke_death_rate",
 }
+# CDC AtlasPlus (NCHHSTP) JSON backend — total new HIV diagnoses by state, 2008+.
+# tx id 801 = "All transmission categories". Undocumented endpoint (browser XHR).
+ATLASPLUS = "https://gis.cdc.gov/grasp/AtlasPlus"
+_BROWSER_UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+               "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+_ATLAS_HDRS = {**_BROWSER_UA, "Content-Type": "application/json; charset=UTF-8",
+               "Referer": ATLASPLUS + "/", "X-Requested-With": "XMLHttpRequest"}
+HIV_YEAR_FROM = 2008
+# CDC Provisional COVID-19 Deaths by state (Socrata), group="By Year", 2020+.
+COVID_SOCRATA = "https://data.cdc.gov/resource/r8kw-7aab.json"
 
 ACS_YEARS = [y for y in range(2005, 2024) if y != 2020]  # no 2020 1-yr release
 BLS_YEARS = list(range(2005, 2025))
@@ -86,6 +96,8 @@ COLUMNS = [
     # health: NCHS age-adjusted death rates per 100k (v2)
     "mortality_all", "cancer_death_rate", "heart_death_rate",
     "flu_pneumonia_death_rate", "diabetes_death_rate", "stroke_death_rate",
+    # HIV new diagnoses per 100k (AtlasPlus, 2008+) + COVID deaths per 100k (2020+)
+    "hiv_diagnosis_rate", "covid_death_rate",
 ]
 
 # name → fips (reverse of STATES) for sources keyed by state name.
@@ -174,11 +186,47 @@ def fetch_acs() -> dict[tuple[str, int], dict]:
     return out
 
 
+def _bls_cache_path() -> str:
+    return cstore.join(cstore.cache_root(), "bls-unemployment.json")
+
+
+def _load_bls_cache() -> dict[tuple[str, int], float]:
+    p = _bls_cache_path()
+    if not cstore.exists(p):
+        return {}
+    try:
+        with cstore.open_read(p) as f:
+            raw = json.load(f)  # {"fips|year": rate}
+        out = {}
+        for k, v in raw.items():
+            fp, yr = k.split("|")
+            out[(fp, int(yr))] = float(v)
+        return out
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _save_bls_cache(data: dict[tuple[str, int], float]) -> None:
+    raw = {f"{fp}|{yr}": v for (fp, yr), v in data.items()}
+    with cstore.open_write(_bls_cache_path(), "w") as f:
+        json.dump(raw, f)
+
+
 def fetch_bls_unemployment() -> dict[tuple[str, int], float]:
-    """{(fips, year): annual mean unemployment rate} from BLS LAUS (statewide, SA)."""
+    """{(fips, year): annual mean unemployment rate} from BLS LAUS (statewide, SA).
+
+    BLS's keyless API has a small daily per-IP quota; a registered key (env
+    ``BLS_API_KEY``, free, 500/day, v2) lifts it. Results are cached to
+    ``bls-unemployment.json`` and REUSED when a live fetch comes back empty
+    (quota exhausted) — so a throttled rebuild keeps the last good series instead
+    of dropping unemployment entirely.
+    """
     _require_requests()
+    cached = _load_bls_cache()
     series_to_fips = {f"LASST{fips}0000000000003": fips for fips in STATES}
     ids = list(series_to_fips)
+    key = os.environ.get("BLS_API_KEY", "").strip()
+    endpoint = ("https://api.bls.gov/publicAPI/v2/timeseries/data/" if key else BLS_V1)
     out: dict[tuple[str, int], float] = {}
     # BLS v1 keyless limits: <=25 series and <=10-year span per request.
     for i in range(0, len(ids), 25):
@@ -186,8 +234,10 @@ def fetch_bls_unemployment() -> dict[tuple[str, int], float]:
         for y0 in range(BLS_YEARS[0], BLS_YEARS[-1] + 1, 10):
             y1 = min(y0 + 9, BLS_YEARS[-1])
             body = {"seriesid": chunk, "startyear": str(y0), "endyear": str(y1)}
+            if key:
+                body["registrationkey"] = key
             try:
-                r = requests.post(BLS_V1, json=body, headers={"User-Agent": USER_AGENT},
+                r = requests.post(endpoint, json=body, headers={"User-Agent": USER_AGENT},
                                   timeout=(30, 90))
                 payload = r.json()
             except Exception as exc:  # noqa: BLE001
@@ -212,8 +262,15 @@ def fetch_bls_unemployment() -> dict[tuple[str, int], float]:
                 for yr, vals in by_year.items():
                     if (fips, yr) not in out and vals:  # prefer M13 if it was present
                         out[(fips, yr)] = round(sum(vals) / len(vals), 2)
-    logger.info("BLS unemployment: %d state-years", len(out))
-    return out
+    if out:
+        _save_bls_cache(out)  # refresh the cache on a good fetch
+        logger.info("BLS unemployment: %d state-years (fetched)", len(out))
+        return out
+    if cached:
+        logger.warning("BLS live fetch empty (quota?) — using %d cached state-years", len(cached))
+        return cached
+    logger.warning("BLS unemployment: 0 state-years (no live data, no cache)")
+    return {}
 
 
 def fetch_pep_migration() -> dict[tuple[str, int], dict]:
@@ -279,6 +336,62 @@ def fetch_nchs_mortality() -> dict[tuple[str, int], dict]:
     return out
 
 
+def fetch_hiv_diagnoses() -> dict[tuple[str, int], int]:
+    """{(fips, year): total new HIV diagnoses} from CDC AtlasPlus (2008+).
+
+    One getInitData catalog call + one qtOutputData POST for transmission id 801
+    ("All transmission categories"). Undocumented JSON backend, so failures
+    degrade to an empty dict rather than aborting the whole panel.
+    """
+    _require_requests()
+    try:
+        init = requests.get(f"{ATLASPLUS}/getInitData/00", headers=_BROWSER_UA, timeout=120).json()
+        vv = init["varvals"]
+        states = [v for v in vv if v.get("vtid") == 3 and v.get("geoLevel") == 1002 and v.get("fips")]
+        gid_fips = {s["id"]: s["fips"] for s in states}
+        years = {str(v["name"]): v["id"] for v in vv if v.get("vtid") == 2}
+        yid_year = {v["id"]: str(v["name"]) for v in vv if v.get("vtid") == 2}
+        ywanted = [y for y in (str(x) for x in range(HIV_YEAR_FROM, 2025)) if y in years]
+        vids = ",".join(["203"] + [str(s["id"]) for s in states]
+                        + [str(years[y]) for y in ywanted] + ["650", "551", "601", "801"])
+        rows = requests.post(f"{ATLASPLUS}/qtOutputData", data=json.dumps({"VariableIDs": vids}),
+                             headers=_ATLAS_HDRS, timeout=180).json().get("sourcedata") or []
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("AtlasPlus HIV fetch failed: %s", exc)
+        return {}
+    out: dict[tuple[str, int], int] = {}
+    for r in rows:
+        if r[9] is None:
+            continue
+        fips, yr = gid_fips.get(r[2]), yid_year.get(r[1])
+        if fips in STATES and yr and yr.isdigit():
+            out[(fips, int(yr))] = int(r[9])
+    logger.info("HIV diagnoses: %d state-years (2008+)", len(out))
+    return out
+
+
+def fetch_covid_deaths() -> dict[tuple[str, int], int]:
+    """{(fips, year): COVID-19 deaths} by state, from CDC provisional (2020+)."""
+    _require_requests()
+    params = {"$where": "`group`='By Year'", "$select": "state,year,covid_19_deaths",
+              "$limit": 20000}
+    try:
+        rows = requests.get(COVID_SOCRATA, params=params, headers={"User-Agent": USER_AGENT},
+                            timeout=(30, 90)).json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("COVID fetch failed: %s", exc)
+        return {}
+    out: dict[tuple[str, int], int] = {}
+    for row in rows:
+        fips = _NAME_TO_FIPS.get(row.get("state"))
+        yr = row.get("year")
+        v = _num(row.get("covid_19_deaths"))
+        if fips and yr and str(yr).isdigit() and v is not None:
+            out[(fips, int(yr))] = int(v)
+    logger.info("COVID deaths: %d state-years (2020+)", len(out))
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Assemble + cache
 # ---------------------------------------------------------------------------
@@ -293,8 +406,24 @@ def build_panel(*, force: bool = False) -> PanelResult:
     bls = fetch_bls_unemployment()
     pep = fetch_pep_migration()
     nchs = fetch_nchs_mortality()
+    hiv = fetch_hiv_diagnoses()
+    covid = fetch_covid_deaths()
 
-    keys = set(acs) | set(bls) | set(pep) | set(nchs)
+    # population lookup with a nearest-year fallback (so COVID 2020, which has no
+    # ACS 1-year release, still gets a per-100k denominator).
+    pop_by = {(fp, yr): d["population"] for (fp, yr), d in acs.items() if d.get("population")}
+
+    def pop_lookup(fp: str, yr: int) -> float | None:
+        for dy in (0, 1, -1, 2, -2):
+            if (fp, yr + dy) in pop_by:
+                return pop_by[(fp, yr + dy)]
+        return None
+
+    def per100k(count, fp, yr):
+        p = pop_lookup(fp, yr)
+        return round(count / p * 100000, 2) if p else None
+
+    keys = set(acs) | set(bls) | set(pep) | set(nchs) | set(hiv) | set(covid)
     rows: list[dict] = []
     for fips, year in sorted(keys, key=lambda k: (STATES[k[0]][0], k[1])):
         postal, name = STATES[fips]
@@ -305,6 +434,10 @@ def build_panel(*, force: bool = False) -> PanelResult:
             rec["unemployment_rate"] = bls[(fips, year)]
         rec.update(pep.get((fips, year), {}))
         rec.update(nchs.get((fips, year), {}))
+        if (fips, year) in hiv:
+            rec["hiv_diagnosis_rate"] = per100k(hiv[(fips, year)], fips, year)
+        if (fips, year) in covid:
+            rec["covid_death_rate"] = per100k(covid[(fips, year)], fips, year)
         rows.append(rec)
 
     coverage = {c: sum(1 for r in rows if r.get(c) is not None) for c in COLUMNS}

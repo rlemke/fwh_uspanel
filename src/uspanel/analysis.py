@@ -33,12 +33,12 @@ REPO_URL = "https://github.com/rlemke/fwh_uspanel"
 
 ANALYSIS_YEARS = range(2010, 2018)  # the econ+migration+health overlap
 # analysis variables (display label → how to compute from a panel row)
-VARS = ["unemp", "dom_mig", "intl_mig", "foreign%", "log_inc", "allcause", "cancer", "heart"]
+VARS = ["unemp", "dom_mig", "intl_mig", "foreign%", "log_inc", "allcause", "cancer", "heart", "hiv"]
 VAR_LABEL = {
     "unemp": "Unemployment", "dom_mig": "Domestic migration /1k",
     "intl_mig": "Intl migration /1k", "foreign%": "Foreign-born %",
     "log_inc": "log(median income)", "allcause": "All-cause mortality",
-    "cancer": "Cancer deaths", "heart": "Heart deaths",
+    "cancer": "Cancer deaths", "heart": "Heart deaths", "hiv": "HIV diagnoses /100k",
 }
 
 HYPOTHESES = [
@@ -49,6 +49,8 @@ HYPOTHESES = [
     ("allcause", "unemp", 0, "Health burden and the economy co-move"),
     ("cancer", "dom_mig", 0, "Cancer burden vs domestic migration"),
     ("heart", "dom_mig", 0, "Heart-disease burden vs domestic migration"),
+    ("hiv", "dom_mig", 0, "HIV burden vs domestic migration"),
+    ("hiv", "foreign%", 0, "HIV burden vs foreign-born share"),
 ]
 
 
@@ -79,6 +81,7 @@ def _row_vars(r: dict) -> dict:
         "allcause": g("mortality_all"),
         "cancer": g("cancer_death_rate"),
         "heart": g("heart_death_rate"),
+        "hiv": g("hiv_diagnosis_rate"),
     }
 
 
@@ -101,6 +104,9 @@ def analyze(rows: list[dict]) -> dict:
         if all(not math.isnan(d[v]) for v in VARS):
             recs.append((r["state"], r["year"], d))
     states = sorted({s for s, _, _ in recs})
+    if len(recs) < len(VARS) + 2:  # not enough complete-case rows to analyze
+        return {"n_rows": len(recs), "n_states": len(states), "years": [0, 0],
+                "vars": VARS, "labels": VAR_LABEL, "demo": [], "matrix": [], "tests": []}
     X = np.array([[d[v] for v in VARS] for _, _, d in recs])
     st = np.array([s for s, _, _ in recs])
     yr = np.array([y for _, y, _ in recs])
