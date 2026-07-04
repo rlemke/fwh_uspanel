@@ -67,6 +67,14 @@ COVID_SOCRATA = "https://data.cdc.gov/resource/r8kw-7aab.json"
 ELECTION_BASE = ("https://raw.githubusercontent.com/tonmcg/"
                  "US_County_Level_Election_Results_08-24/master")
 ELECTION_YEARS = [2008, 2012, 2016, 2020, 2024]
+# SEC DERA Financial Statement Data Sets — quarterly sub.txt carries each filer's
+# business-address state (stprba). Tracking it across years detects HQ relocations
+# (e.g. Tesla CA->TX). One quarter/year sampled; the per-year maps are cached (the
+# data for a past quarter is immutable).
+DERA_BASE = "https://www.sec.gov/files/dera/data/financial-statement-data-sets"
+DERA_QUARTER = "q2"  # Q2 catches most annual (10-K) filers
+HQ_YEARS = list(range(2010, 2018))  # panel-overlap window; moves detectable 2011-2017
+SEC_UA = "facetwork research ralph_lemke@hotmail.com"
 
 ACS_YEARS = [y for y in range(2005, 2024) if y != 2020]  # no 2020 1-yr release
 BLS_YEARS = list(range(2005, 2025))
@@ -105,10 +113,13 @@ COLUMNS = [
     "hiv_diagnosis_rate", "covid_death_rate",
     # political: 2-party Democratic presidential vote share % (higher = bluer)
     "dem_pres_share",
+    # corporate: public-company HQs based in the state + net HQ relocations (SEC)
+    "corp_hq_count", "corp_hq_net",
 ]
 
-# name → fips (reverse of STATES) for sources keyed by state name.
+# reverse lookups for sources keyed by state name / postal code.
 _NAME_TO_FIPS = {name: fips for fips, (_p, name) in STATES.items()}
+_POSTAL_TO_FIPS = {postal: fips for fips, (postal, _n) in STATES.items()}
 
 
 @dataclass
@@ -459,6 +470,84 @@ def fetch_partisan_lean() -> dict[tuple[str, int], float]:
     return out
 
 
+def _hq_states_for_year(year: int) -> dict[str, str]:
+    """{cik: business-state postal} for filers in {year}Q2, cached per year.
+
+    Downloads the DERA quarterly zip once (~96MB), extracts just sub.txt, keeps
+    each filer's US business-address state, and caches the small map. Past-quarter
+    data is immutable, so the cache is authoritative on re-runs.
+    """
+    import csv as _csv
+    import io as _io
+    import zipfile as _zip
+
+    cache_key = cstore.join(cstore.cache_root(), f"hq-{year}.json")
+    if cstore.exists(cache_key):
+        try:
+            with cstore.open_read(cache_key) as f:
+                return json.load(f)
+        except Exception:  # noqa: BLE001
+            pass
+    url = f"{DERA_BASE}/{year}{DERA_QUARTER}.zip"
+    try:
+        content = requests.get(url, headers={"User-Agent": SEC_UA}, timeout=(30, 240)).content
+        with _zip.ZipFile(_io.BytesIO(content)) as zf:
+            text = zf.read("sub.txt").decode("latin-1")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("DERA %s fetch failed: %s", year, exc)
+        return {}
+    out: dict[str, str] = {}
+    reader = _csv.DictReader(_io.StringIO(text), delimiter="\t")
+    for row in reader:
+        cik = row.get("cik")
+        st = (row.get("stprba") or "").strip().upper()
+        country = (row.get("countryba") or "").strip().upper()
+        if cik and st in _POSTAL_TO_FIPS and country in ("US", ""):
+            out[cik] = st  # last filing that quarter wins (fine for an annual snapshot)
+    with cstore.open_write(cache_key, "w") as f:
+        json.dump(out, f)
+    logger.info("DERA HQ %s: %d public-company HQs", year, len(out))
+    return out
+
+
+def fetch_hq_migration() -> dict[tuple[str, int], dict]:
+    """{(fips, year): {corp_hq_count, corp_hq_net}} from SEC business-address state.
+
+    corp_hq_count = public-company HQs based in the state that year; corp_hq_net =
+    net HQ relocations (companies that moved IN minus OUT), detected as a change in
+    a company's business-address state between consecutive annual snapshots. Both
+    default to 0 for a covered state-year (a real zero, not missing).
+    """
+    _require_requests()
+    by_year = {y: _hq_states_for_year(y) for y in HQ_YEARS}
+    covered = [y for y in HQ_YEARS if by_year.get(y)]
+    if not covered:
+        return {}
+    out: dict[tuple[str, int], dict] = {}
+    # counts (level) for every covered year
+    for y in covered:
+        counts: dict[str, int] = {}
+        for st in by_year[y].values():
+            counts[st] = counts.get(st, 0) + 1
+        for postal, fips in _POSTAL_TO_FIPS.items():
+            out[(fips, y)] = {"corp_hq_count": counts.get(postal, 0)}
+    # net relocations — only for years whose prior year is covered (measurable);
+    # a real 0 for states with no move, but left unset where it can't be computed.
+    for y in covered:
+        if y - 1 not in by_year or not by_year[y - 1]:
+            continue
+        for fips in STATES:
+            out[(fips, y)]["corp_hq_net"] = 0
+        prev, cur = by_year[y - 1], by_year[y]
+        for cik, st_now in cur.items():
+            st_before = prev.get(cik)
+            if st_before and st_before != st_now and st_before in _POSTAL_TO_FIPS:
+                out[(_POSTAL_TO_FIPS[st_now], y)]["corp_hq_net"] += 1     # moved IN
+                out[(_POSTAL_TO_FIPS[st_before], y)]["corp_hq_net"] -= 1  # moved OUT
+    logger.info("corp HQ migration: %d state-years (%s)", len(out), covered)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Assemble + cache
 # ---------------------------------------------------------------------------
@@ -476,6 +565,7 @@ def build_panel(*, force: bool = False) -> PanelResult:
     hiv = fetch_hiv_diagnoses()
     covid = fetch_covid_deaths()
     partisan = fetch_partisan_lean()
+    hq = fetch_hq_migration()
 
     # population lookup with a nearest-year fallback (so COVID 2020, which has no
     # ACS 1-year release, still gets a per-100k denominator).
@@ -491,7 +581,8 @@ def build_panel(*, force: bool = False) -> PanelResult:
         p = pop_lookup(fp, yr)
         return round(count / p * 100000, 2) if p else None
 
-    keys = set(acs) | set(bls) | set(pep) | set(nchs) | set(hiv) | set(covid) | set(partisan)
+    keys = (set(acs) | set(bls) | set(pep) | set(nchs) | set(hiv) | set(covid)
+            | set(partisan) | set(hq))
     rows: list[dict] = []
     for fips, year in sorted(keys, key=lambda k: (STATES[k[0]][0], k[1])):
         postal, name = STATES[fips]
@@ -508,6 +599,8 @@ def build_panel(*, force: bool = False) -> PanelResult:
             rec["covid_death_rate"] = per100k(covid[(fips, year)], fips, year)
         if (fips, year) in partisan:
             rec["dem_pres_share"] = partisan[(fips, year)]
+        if (fips, year) in hq:
+            rec.update(hq[(fips, year)])
         rows.append(rec)
 
     coverage = {c: sum(1 for r in rows if r.get(c) is not None) for c in COLUMNS}

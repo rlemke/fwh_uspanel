@@ -34,13 +34,13 @@ REPO_URL = "https://github.com/rlemke/fwh_uspanel"
 ANALYSIS_YEARS = range(2010, 2018)  # the econ+migration+health overlap
 # analysis variables (display label → how to compute from a panel row)
 VARS = ["unemp", "dom_mig", "intl_mig", "foreign%", "log_inc", "allcause", "cancer",
-        "heart", "hiv", "dem_share"]
+        "heart", "hiv", "dem_share", "hq_net"]
 VAR_LABEL = {
     "unemp": "Unemployment", "dom_mig": "Domestic migration /1k",
     "intl_mig": "Intl migration /1k", "foreign%": "Foreign-born %",
     "log_inc": "log(median income)", "allcause": "All-cause mortality",
     "cancer": "Cancer deaths", "heart": "Heart deaths", "hiv": "HIV diagnoses /100k",
-    "dem_share": "Dem pres vote %",
+    "dem_share": "Dem pres vote %", "hq_net": "Corp HQ net moves",
 }
 
 HYPOTHESES = [
@@ -55,6 +55,8 @@ HYPOTHESES = [
     ("hiv", "foreign%", 0, "HIV burden vs foreign-born share"),
     ("dem_share", "dom_mig", 0, "Do people leave BLUER states — politics, or the economics beneath it?"),
     ("dem_share", "unemp", 0, "Are bluer states higher-unemployment (a confounder check)?"),
+    ("hq_net", "dom_mig", 0, "Do PEOPLE follow COMPANIES? (net corporate HQ moves vs domestic migration)"),
+    ("hq_net", "unemp", 0, "Do companies leave higher-unemployment states?"),
 ]
 
 
@@ -87,6 +89,7 @@ def _row_vars(r: dict) -> dict:
         "heart": g("heart_death_rate"),
         "hiv": g("hiv_diagnosis_rate"),
         "dem_share": g("dem_pres_share"),
+        "hq_net": g("corp_hq_net"),
     }
 
 

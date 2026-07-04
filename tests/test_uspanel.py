@@ -38,6 +38,9 @@ def _patch(monkeypatch):
     monkeypatch.setattr(_lib, "fetch_hiv_diagnoses", lambda: {("06", 2015): 5069, ("48", 2015): 4512})
     monkeypatch.setattr(_lib, "fetch_covid_deaths", lambda: {("06", 2024): 9000})
     monkeypatch.setattr(_lib, "fetch_partisan_lean", lambda: {("06", 2015): 60.2, ("48", 2015): 41.4})
+    monkeypatch.setattr(_lib, "fetch_hq_migration", lambda: {
+        ("06", 2015): {"corp_hq_count": 700, "corp_hq_net": -12},
+        ("48", 2015): {"corp_hq_count": 300, "corp_hq_net": 8}})
 
 
 def test_build_panel_joins_and_covers(local_storage, monkeypatch):
@@ -105,6 +108,7 @@ def test_analyze_and_render_on_synthetic_panel():
                 "mortality_all": 700 + 10 * si, "cancer_death_rate": 150 + si,
                 "heart_death_rate": 160 + si, "hiv_diagnosis_rate": 8 + si + 0.3 * (yr - 2010),
                 "dem_pres_share": 45 + 2 * si + (yr - 2010),
+                "corp_hq_net": (si - 2) * 3 + (yr - 2013),
             })
     res = analysis.analyze(rows)
     assert res["n_rows"] == 48 and res["n_states"] == 6
