@@ -25,7 +25,25 @@ def handle_build_panel(params: dict[str, Any]) -> dict[str, Any]:
         raise
 
 
-_DISPATCH: dict[str, Any] = {f"{MAPS}.BuildPanel": handle_build_panel}
+def handle_build_findings(params: dict[str, Any]) -> dict[str, Any]:
+    from ..analysis import build_findings
+    step_log = params.get("_step_log")
+    try:
+        res = build_findings(force=bool(params.get("force")))
+        if step_log:
+            step_log(f"BuildFindings: {res.n_rows} rows, {res.n_states} states "
+                     f"-> {res.html_path}", level="success")
+        return {"html_path": res.html_path, "n_rows": res.n_rows, "n_states": res.n_states}
+    except Exception as exc:
+        if step_log:
+            step_log(f"BuildFindings: {exc}", level="error")
+        raise
+
+
+_DISPATCH: dict[str, Any] = {
+    f"{MAPS}.BuildPanel": handle_build_panel,
+    f"{MAPS}.BuildFindings": handle_build_findings,
+}
 
 
 def handle(payload: dict) -> dict:

@@ -19,6 +19,17 @@ namespace uspanel.data {
         year_min: Int,
         year_max: Int
     ) with Effect(kind = "external") with Cost(tier = "moderate") with Timeout(minutes = 15)
+
+    /** Analyze the cached panel (levels-vs-within, FE correlation matrix,
+      * state-clustered bootstrap of the key hypotheses) and render the
+      * self-contained findings HTML page. */
+    event facet BuildFindings(
+        force: Boolean = false
+    ) => (
+        html_path: String,
+        n_rows: Int,
+        n_states: Int
+    ) with Effect(kind = "io") with Cost(tier = "cheap") with Timeout(minutes = 15)
 }
 
 namespace uspanel.workflows {
@@ -33,6 +44,18 @@ namespace uspanel.workflows {
             status = "completed",
             csv_path = panel.csv_path,
             n_rows = panel.n_rows
+        )
+    }
+
+    /** Build the published findings page from the US state panel. */
+    workflow BuildUSPanelFindings(
+        force: Boolean = false
+    ) => (status: String, html_path: String, n_rows: Int) andThen {
+        f = BuildFindings(force = $.force)
+        yield BuildUSPanelFindings(
+            status = "completed",
+            html_path = f.html_path,
+            n_rows = f.n_rows
         )
     }
 }

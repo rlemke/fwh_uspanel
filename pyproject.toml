@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Facetwork domain: US state x year multi-source data panel (Census/BLS)"
 requires-python = ">=3.11"
 authors = [{name = "Ralph Lemke"}]
-dependencies = ["requests"]
+dependencies = ["requests", "numpy>=1.24"]
 
 [project.entry-points."facetwork.domains"]
 uspanel = "uspanel:domain"

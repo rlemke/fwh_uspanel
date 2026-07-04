@@ -80,3 +80,32 @@ def test_num_handles_suppression_sentinels():
     assert _lib._num("") is None
     assert _lib._num("5.1") == 5.1
     assert _lib._num("-79938.0") == -79938.0    # legitimate negative (out-migration)
+
+
+def test_analyze_and_render_on_synthetic_panel():
+    """analyze() runs on a small synthetic state panel and render produces HTML."""
+    import math
+    from uspanel import analysis
+
+    # 6 states x 8 years, with a built-in unemployment->out-migration relationship
+    rows = []
+    for si, st in enumerate(["CA", "TX", "NY", "FL", "OH", "AZ"]):
+        for yr in range(2010, 2018):
+            u = 5 + si + 0.5 * (yr - 2010)
+            rows.append({
+                "state": st, "year": yr,
+                "population": 10_000_000, "median_hh_income": 55000 + 500 * si,
+                "foreign_born_pct": 10 + si, "unemployment_rate": u,
+                # domestic migration falls as unemployment rises (the signal)
+                "net_domestic_migration": int(-1000 * u + 200 * (si - 2)),
+                "net_international_migration": 5000,
+                "mortality_all": 700 + 10 * si, "cancer_death_rate": 150 + si,
+                "heart_death_rate": 160 + si,
+            })
+    res = analysis.analyze(rows)
+    assert res["n_rows"] == 48 and res["n_states"] == 6
+    assert len(res["matrix"]) == len(analysis.VARS)
+    # the demo table + at least one hypothesis test are present
+    assert res["demo"] and res["tests"]
+    html = analysis.render_findings_html(res)
+    assert "<!doctype html>" in html and "Within-state correlation matrix" in html
