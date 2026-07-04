@@ -1,0 +1,38 @@
+// US-panel domain — reproducible US state x year multi-source data panel.
+//
+// BuildPanel fetches + aligns Census ACS (population / median income / foreign-
+// born %), BLS LAUS (unemployment rate), and Census PEP (net domestic + net
+// international migration) into one tidy state-year table cached as CSV + JSON.
+// The socioeconomic + migration spine for a "what moves with what across US
+// states over time" analysis (health columns are the planned v2).
+
+namespace uspanel.data {
+    /** Fetch every source, outer-join on (state, year), cache the tidy panel
+      * as CSV + JSON with a per-column coverage report. Census needs
+      * CENSUS_API_KEY; BLS is keyless. */
+    event facet BuildPanel(
+        force: Boolean = false
+    ) => (
+        csv_path: String,
+        json_path: String,
+        n_rows: Int,
+        year_min: Int,
+        year_max: Int
+    ) with Effect(kind = "external") with Cost(tier = "moderate") with Timeout(minutes = 15)
+}
+
+namespace uspanel.workflows {
+    use uspanel.data
+
+    /** Build the US state x year data panel (Census + BLS). */
+    workflow BuildUSStatePanel(
+        force: Boolean = false
+    ) => (status: String, csv_path: String, n_rows: Int) andThen {
+        panel = BuildPanel(force = $.force)
+        yield BuildUSStatePanel(
+            status = "completed",
+            csv_path = panel.csv_path,
+            n_rows = panel.n_rows
+        )
+    }
+}
