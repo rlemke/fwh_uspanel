@@ -41,6 +41,17 @@ logger = logging.getLogger("uspanel")
 USER_AGENT = "facetwork-uspanel/1.0 (+https://github.com/rlemke/facetwork)"
 CENSUS_BASE = "https://api.census.gov/data"
 BLS_V1 = "https://api.bls.gov/publicAPI/v1/timeseries/data/"
+# NCHS Leading Causes of Death by state (Socrata, 1999-2017), age-adjusted death
+# rate per 100k. cause_name → panel column.
+NCHS_SOCRATA = "https://data.cdc.gov/resource/bi63-dtpu.json"
+NCHS_CAUSES = {
+    "All causes": "mortality_all",
+    "Cancer": "cancer_death_rate",
+    "Heart disease": "heart_death_rate",
+    "Influenza and pneumonia": "flu_pneumonia_death_rate",
+    "Diabetes": "diabetes_death_rate",
+    "Stroke": "stroke_death_rate",
+}
 
 ACS_YEARS = [y for y in range(2005, 2024) if y != 2020]  # no 2020 1-yr release
 BLS_YEARS = list(range(2005, 2025))
@@ -67,11 +78,18 @@ STATES: dict[str, tuple[str, str]] = {
     "54": ("WV", "West Virginia"), "55": ("WI", "Wisconsin"), "56": ("WY", "Wyoming"),
 }
 
-# Panel columns produced by v1 (besides the fips/postal/name/year keys).
+# Panel columns (besides the fips/postal/name/year keys).
 COLUMNS = [
+    # socioeconomic + migration spine (v1)
     "population", "median_hh_income", "foreign_born_pct",
     "unemployment_rate", "net_domestic_migration", "net_international_migration",
+    # health: NCHS age-adjusted death rates per 100k (v2)
+    "mortality_all", "cancer_death_rate", "heart_death_rate",
+    "flu_pneumonia_death_rate", "diabetes_death_rate", "stroke_death_rate",
 ]
+
+# name → fips (reverse of STATES) for sources keyed by state name.
+_NAME_TO_FIPS = {name: fips for fips, (_p, name) in STATES.items()}
 
 
 @dataclass
@@ -229,6 +247,38 @@ def fetch_pep_migration() -> dict[tuple[str, int], dict]:
     return out
 
 
+def fetch_nchs_mortality() -> dict[tuple[str, int], dict]:
+    """{(fips, year): {cause_col: age-adjusted death rate}} from NCHS (1999-2017).
+
+    One Socrata call for the causes in ``NCHS_CAUSES``; ``aadr`` (age-adjusted
+    death rate per 100k) is the right cross-state/time metric — it removes the
+    age-structure confound that raw counts carry.
+    """
+    _require_requests()
+    causes = "','".join(NCHS_CAUSES)
+    params = {"$limit": 60000, "$where": f"cause_name in ('{causes}')",
+              "$select": "year,cause_name,state,aadr"}
+    r = requests.get(NCHS_SOCRATA, params=params, headers={"User-Agent": USER_AGENT},
+                     timeout=(30, 120))
+    r.raise_for_status()
+    out: dict[tuple[str, int], dict] = {}
+    for row in r.json():
+        fips = _NAME_TO_FIPS.get(row.get("state"))  # skips "United States" + territories
+        if not fips:
+            continue
+        rate = _num(row.get("aadr"))
+        col = NCHS_CAUSES.get(row.get("cause_name"))
+        if rate is None or col is None:
+            continue
+        try:
+            year = int(row["year"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        out.setdefault((fips, year), {})[col] = rate
+    logger.info("NCHS mortality: %d state-years (1999-2017)", len(out))
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Assemble + cache
 # ---------------------------------------------------------------------------
@@ -242,8 +292,9 @@ def build_panel(*, force: bool = False) -> PanelResult:
     acs = fetch_acs()
     bls = fetch_bls_unemployment()
     pep = fetch_pep_migration()
+    nchs = fetch_nchs_mortality()
 
-    keys = set(acs) | set(bls) | set(pep)
+    keys = set(acs) | set(bls) | set(pep) | set(nchs)
     rows: list[dict] = []
     for fips, year in sorted(keys, key=lambda k: (STATES[k[0]][0], k[1])):
         postal, name = STATES[fips]
@@ -253,6 +304,7 @@ def build_panel(*, force: bool = False) -> PanelResult:
         if (fips, year) in bls:
             rec["unemployment_rate"] = bls[(fips, year)]
         rec.update(pep.get((fips, year), {}))
+        rec.update(nchs.get((fips, year), {}))
         rows.append(rec)
 
     coverage = {c: sum(1 for r in rows if r.get(c) is not None) for c in COLUMNS}

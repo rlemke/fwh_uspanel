@@ -31,6 +31,10 @@ def _patch(monkeypatch):
         ("06", 2015): {"net_domestic_migration": -79938.0, "net_international_migration": 156870.0},
         ("48", 2015): {"net_domestic_migration": 172048.0, "net_international_migration": 117660.0},
     })
+    monkeypatch.setattr(_lib, "fetch_nchs_mortality", lambda: {
+        ("06", 2015): {"mortality_all": 619.9, "cancer_death_rate": 143.6, "heart_death_rate": 165.4},
+        ("48", 2015): {"mortality_all": 741.0, "cancer_death_rate": 152.0, "heart_death_rate": 190.0},
+    })
 
 
 def test_build_panel_joins_and_covers(local_storage, monkeypatch):
@@ -51,6 +55,9 @@ def test_build_panel_joins_and_covers(local_storage, monkeypatch):
     assert ca15["name"] == "California"
     assert float(ca15["foreign_born_pct"]) == 27.3
     assert float(ca15["net_domestic_migration"]) == -79938.0
+    # health columns join alongside econ/migration on the same state-year
+    assert float(ca15["cancer_death_rate"]) == 143.6
+    assert float(ca15["mortality_all"]) == 619.9
     # the CA-2024 row has unemployment but blank population (ragged panel)
     ca24 = next(r for r in rows if r["state"] == "CA" and r["year"] == "2024")
     assert ca24["unemployment_rate"] == "5.3"
