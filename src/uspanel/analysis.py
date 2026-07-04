@@ -33,12 +33,14 @@ REPO_URL = "https://github.com/rlemke/fwh_uspanel"
 
 ANALYSIS_YEARS = range(2010, 2018)  # the econ+migration+health overlap
 # analysis variables (display label → how to compute from a panel row)
-VARS = ["unemp", "dom_mig", "intl_mig", "foreign%", "log_inc", "allcause", "cancer", "heart", "hiv"]
+VARS = ["unemp", "dom_mig", "intl_mig", "foreign%", "log_inc", "allcause", "cancer",
+        "heart", "hiv", "dem_share"]
 VAR_LABEL = {
     "unemp": "Unemployment", "dom_mig": "Domestic migration /1k",
     "intl_mig": "Intl migration /1k", "foreign%": "Foreign-born %",
     "log_inc": "log(median income)", "allcause": "All-cause mortality",
     "cancer": "Cancer deaths", "heart": "Heart deaths", "hiv": "HIV diagnoses /100k",
+    "dem_share": "Dem pres vote %",
 }
 
 HYPOTHESES = [
@@ -51,6 +53,8 @@ HYPOTHESES = [
     ("heart", "dom_mig", 0, "Heart-disease burden vs domestic migration"),
     ("hiv", "dom_mig", 0, "HIV burden vs domestic migration"),
     ("hiv", "foreign%", 0, "HIV burden vs foreign-born share"),
+    ("dem_share", "dom_mig", 0, "Do people leave BLUER states — politics, or the economics beneath it?"),
+    ("dem_share", "unemp", 0, "Are bluer states higher-unemployment (a confounder check)?"),
 ]
 
 
@@ -82,6 +86,7 @@ def _row_vars(r: dict) -> dict:
         "cancer": g("cancer_death_rate"),
         "heart": g("heart_death_rate"),
         "hiv": g("hiv_diagnosis_rate"),
+        "dem_share": g("dem_pres_share"),
     }
 
 
@@ -124,8 +129,8 @@ def analyze(rows: list[dict]) -> dict:
 
     # levels-vs-within demonstration pairs
     demo = []
-    for a, b in [("log_inc", "cancer"), ("unemp", "dom_mig"), ("foreign%", "dom_mig"),
-                 ("allcause", "unemp")]:
+    for a, b in [("log_inc", "cancer"), ("dem_share", "dom_mig"), ("unemp", "dom_mig"),
+                 ("foreign%", "dom_mig")]:
         demo.append({"a": a, "b": b,
                      "level": _corr(X[:, VARS.index(a)], X[:, VARS.index(b)]),
                      "within": _corr(D[a], D[b])})

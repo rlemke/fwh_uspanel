@@ -62,6 +62,11 @@ _ATLAS_HDRS = {**_BROWSER_UA, "Content-Type": "application/json; charset=UTF-8",
 HIV_YEAR_FROM = 2008
 # CDC Provisional COVID-19 Deaths by state (Socrata), group="By Year", 2020+.
 COVID_SOCRATA = "https://data.cdc.gov/resource/r8kw-7aab.json"
+# State partisan lean = 2-party Democratic presidential vote share, aggregated
+# county->state from tonmcg's open results, forward-filled to each panel year.
+ELECTION_BASE = ("https://raw.githubusercontent.com/tonmcg/"
+                 "US_County_Level_Election_Results_08-24/master")
+ELECTION_YEARS = [2008, 2012, 2016, 2020, 2024]
 
 ACS_YEARS = [y for y in range(2005, 2024) if y != 2020]  # no 2020 1-yr release
 BLS_YEARS = list(range(2005, 2025))
@@ -98,6 +103,8 @@ COLUMNS = [
     "flu_pneumonia_death_rate", "diabetes_death_rate", "stroke_death_rate",
     # HIV new diagnoses per 100k (AtlasPlus, 2008+) + COVID deaths per 100k (2020+)
     "hiv_diagnosis_rate", "covid_death_rate",
+    # political: 2-party Democratic presidential vote share % (higher = bluer)
+    "dem_pres_share",
 ]
 
 # name → fips (reverse of STATES) for sources keyed by state name.
@@ -392,6 +399,66 @@ def fetch_covid_deaths() -> dict[tuple[str, int], int]:
     return out
 
 
+def _agg_share(dem_by_state: dict, gop_by_state: dict) -> dict[str, float]:
+    """{fips: 2-party Democratic vote share %} from summed dem/gop by state."""
+    out = {}
+    for fp in dem_by_state:
+        d, g = dem_by_state[fp], gop_by_state.get(fp, 0)
+        if d + g > 0 and fp in STATES:
+            out[fp] = round(d / (d + g) * 100, 2)
+    return out
+
+
+def fetch_partisan_lean() -> dict[tuple[str, int], float]:
+    """{(fips, year): Dem 2-party presidential vote share %} forward-filled.
+
+    Aggregates county-level results (tonmcg, open CSVs) to a state 2-party
+    Democratic share per election, then assigns each panel year the most recent
+    election at or before it (slow-moving lean). Higher = bluer.
+    """
+    _require_requests()
+    import csv as _csv
+    import io as _io
+
+    def _rows(url):
+        r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=(30, 90))
+        r.raise_for_status()
+        return list(_csv.DictReader(_io.StringIO(r.text)))
+
+    share: dict[int, dict[str, float]] = {}
+    try:
+        # 2008 / 2012 / 2016 — one wide file keyed by county fips_code.
+        wide = _rows(f"{ELECTION_BASE}/US_County_Level_Presidential_Results_08-16.csv")
+        for e in (2008, 2012, 2016):
+            dem, gop = {}, {}
+            for row in wide:
+                fp = str(row.get("fips_code", "")).split(".")[0].zfill(5)[:2]
+                dem[fp] = dem.get(fp, 0) + int(_num(row.get(f"dem_{e}")) or 0)
+                gop[fp] = gop.get(fp, 0) + int(_num(row.get(f"gop_{e}")) or 0)
+            share[e] = _agg_share(dem, gop)
+        # 2020 / 2024 — per-year long files (votes_dem / votes_gop / county_fips).
+        for e in (2020, 2024):
+            dem, gop = {}, {}
+            for row in _rows(f"{ELECTION_BASE}/{e}_US_County_Level_Presidential_Results.csv"):
+                fp = str(row.get("county_fips", "")).split(".")[0].zfill(5)[:2]
+                dem[fp] = dem.get(fp, 0) + int(_num(row.get("votes_dem")) or 0)
+                gop[fp] = gop.get(fp, 0) + int(_num(row.get("votes_gop")) or 0)
+            share[e] = _agg_share(dem, gop)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("partisan-lean fetch failed: %s", exc)
+        return {}
+
+    elections = sorted(share)
+    out: dict[tuple[str, int], float] = {}
+    for fips in STATES:
+        for year in range(2005, 2025):
+            prior = [e for e in elections if e <= year and fips in share[e]]
+            if prior:
+                out[(fips, year)] = share[max(prior)][fips]
+    logger.info("partisan lean: %d state-years (forward-filled from %s)", len(out), elections)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Assemble + cache
 # ---------------------------------------------------------------------------
@@ -408,6 +475,7 @@ def build_panel(*, force: bool = False) -> PanelResult:
     nchs = fetch_nchs_mortality()
     hiv = fetch_hiv_diagnoses()
     covid = fetch_covid_deaths()
+    partisan = fetch_partisan_lean()
 
     # population lookup with a nearest-year fallback (so COVID 2020, which has no
     # ACS 1-year release, still gets a per-100k denominator).
@@ -423,7 +491,7 @@ def build_panel(*, force: bool = False) -> PanelResult:
         p = pop_lookup(fp, yr)
         return round(count / p * 100000, 2) if p else None
 
-    keys = set(acs) | set(bls) | set(pep) | set(nchs) | set(hiv) | set(covid)
+    keys = set(acs) | set(bls) | set(pep) | set(nchs) | set(hiv) | set(covid) | set(partisan)
     rows: list[dict] = []
     for fips, year in sorted(keys, key=lambda k: (STATES[k[0]][0], k[1])):
         postal, name = STATES[fips]
@@ -438,6 +506,8 @@ def build_panel(*, force: bool = False) -> PanelResult:
             rec["hiv_diagnosis_rate"] = per100k(hiv[(fips, year)], fips, year)
         if (fips, year) in covid:
             rec["covid_death_rate"] = per100k(covid[(fips, year)], fips, year)
+        if (fips, year) in partisan:
+            rec["dem_pres_share"] = partisan[(fips, year)]
         rows.append(rec)
 
     coverage = {c: sum(1 for r in rows if r.get(c) is not None) for c in COLUMNS}
