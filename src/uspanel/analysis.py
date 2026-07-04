@@ -308,11 +308,17 @@ was confounding, not a relationship.</div>
 <h2>What holds up</h2>
 <div class="cards">{cards or '<div class="card">Nothing survived the clustered test.</div>'}</div>
 
-<h2>What doesn't — including health</h2>
+<h2>What doesn't — including health, politics &amp; companies</h2>
 <p>These do <b>not</b> survive the within-state, clustered test (confidence interval spans zero):
 {escape(', '.join(lab[t['x']]+'→'+lab[t['y']] for t in nulls)) or '—'}. The health↔migration
 nulls are the notable ones: at this scale and frequency, <b>disease burden does not visibly drive
 where Americans move</b>.</p>
+<p><b>Do people follow companies?</b> Corporate HQ relocations (from SEC filing addresses) point
+the <i>same way</i> as people in the raw numbers — California and New York lose both companies and
+residents; Texas and Florida gain both — but HQ moves are rare, lumpy events (a dozen a year even
+for the biggest states), so they show <b>no year-to-year within-state co-movement</b> with people
+migration. Read that as both being pulled by the same economics, not people literally chasing
+headquarters.</p>
 
 <h2>Levels mislead — the same pairs, two ways</h2>
 <table><tr><th>pair</th><th class="v">naive level r</th><th class="v">within-state r</th></tr>
