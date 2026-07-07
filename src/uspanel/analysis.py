@@ -33,12 +33,13 @@ REPO_URL = "https://github.com/rlemke/fwh_uspanel"
 
 ANALYSIS_YEARS = range(2010, 2018)  # the econ+migration+health overlap
 # analysis variables (display label → how to compute from a panel row)
-VARS = ["unemp", "dom_mig", "intl_mig", "foreign%", "log_inc", "allcause", "cancer",
+VARS = ["unemp", "dom_mig", "intl_mig", "foreign%", "log_inc", "aid", "allcause", "cancer",
         "heart", "hiv", "dem_share", "hq_net"]
 VAR_LABEL = {
     "unemp": "Unemployment", "dom_mig": "Domestic migration /1k",
     "intl_mig": "Intl migration /1k", "foreign%": "Foreign-born %",
-    "log_inc": "log(median income)", "allcause": "All-cause mortality",
+    "log_inc": "log(median income)", "aid": "Public aid %",
+    "allcause": "All-cause mortality",
     "cancer": "Cancer deaths", "heart": "Heart deaths", "hiv": "HIV diagnoses /100k",
     "dem_share": "Dem pres vote %", "hq_net": "Corp HQ net moves",
 }
@@ -57,6 +58,8 @@ HYPOTHESES = [
     ("dem_share", "unemp", 0, "Are bluer states higher-unemployment (a confounder check)?"),
     ("hq_net", "dom_mig", 0, "Do PEOPLE follow COMPANIES? (net corporate HQ moves vs domestic migration)"),
     ("hq_net", "unemp", 0, "Do companies leave higher-unemployment states?"),
+    ("aid", "dem_share", 0, "'Red-state welfare': does govt-aid usage track partisan lean?"),
+    ("aid", "unemp", 0, "Does aid usage track economic distress (unemployment)?"),
 ]
 
 
@@ -84,6 +87,7 @@ def _row_vars(r: dict) -> dict:
         "intl_mig": g("net_international_migration") / pop * 1000 if pop else math.nan,
         "foreign%": g("foreign_born_pct"),
         "log_inc": math.log(inc) if inc and inc > 0 else math.nan,
+        "aid": g("aid_pct"),
         "allcause": g("mortality_all"),
         "cancer": g("cancer_death_rate"),
         "heart": g("heart_death_rate"),
@@ -132,8 +136,8 @@ def analyze(rows: list[dict]) -> dict:
 
     # levels-vs-within demonstration pairs
     demo = []
-    for a, b in [("log_inc", "cancer"), ("dem_share", "dom_mig"), ("unemp", "dom_mig"),
-                 ("foreign%", "dom_mig")]:
+    for a, b in [("log_inc", "cancer"), ("aid", "dem_share"), ("dem_share", "dom_mig"),
+                 ("unemp", "dom_mig")]:
         demo.append({"a": a, "b": b,
                      "level": _corr(X[:, VARS.index(a)], X[:, VARS.index(b)]),
                      "within": _corr(D[a], D[b])})
@@ -339,7 +343,10 @@ recovery period (limited range). This is <b>state-level</b> (ecological ≠ indi
 correlation makes reverse-causation less likely but is <b>not proof of cause</b>. Several pairs were
 tested, so a borderline result could be chance. Cancer, heart disease and HIV are all in this
 analysis (all show no robust migration link); COVID is in the panel but starts in 2020, outside
-this 2010&ndash;2017 window, so it is not in this correlation. Partisan lean is the state's
+this 2010&ndash;2017 window, so it is not in this correlation. <b>Government-aid usage</b>
+(households on SNAP or public assistance) is a STATE rate, not a person: a state where more
+households receive aid tells you nothing about whether aid recipients lean one party &mdash; the
+classic ecological fallacy, and a famous trap for the "red-state welfare" claim. Partisan lean is the state's
 2-party presidential vote share, forward-filled between elections (so it moves slowly within a
 state); Alaska is absent from the county-level election source for 2008&ndash;2016, so the panel
 here is 50 units, not 51.</div>

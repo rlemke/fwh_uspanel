@@ -21,8 +21,10 @@ def local_storage(tmp_path, monkeypatch):
 def _patch(monkeypatch):
     from uspanel import _lib
     monkeypatch.setattr(_lib, "fetch_acs", lambda: {
-        ("06", 2015): {"population": 39144818.0, "median_hh_income": 64500.0, "foreign_born_pct": 27.3},
-        ("48", 2015): {"population": 27469114.0, "median_hh_income": 55653.0, "foreign_born_pct": 17.0},
+        ("06", 2015): {"population": 39144818.0, "median_hh_income": 64500.0, "foreign_born_pct": 27.3,
+                       "aid_pct": 9.4},
+        ("48", 2015): {"population": 27469114.0, "median_hh_income": 55653.0, "foreign_born_pct": 17.0,
+                       "aid_pct": 11.2},
     })
     monkeypatch.setattr(_lib, "fetch_bls_unemployment", lambda: {
         ("06", 2015): 6.22, ("48", 2015): 4.47, ("06", 2024): 5.3,
@@ -108,6 +110,7 @@ def test_analyze_and_render_on_synthetic_panel():
                 "mortality_all": 700 + 10 * si, "cancer_death_rate": 150 + si,
                 "heart_death_rate": 160 + si, "hiv_diagnosis_rate": 8 + si + 0.3 * (yr - 2010),
                 "dem_pres_share": 45 + 2 * si + (yr - 2010),
+                "aid_pct": 8 + si * 0.5 + (yr - 2013) * 0.2,
                 "corp_hq_net": (si - 2) * 3 + (yr - 2013),
             })
     res = analysis.analyze(rows)

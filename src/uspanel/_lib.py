@@ -104,7 +104,7 @@ STATES: dict[str, tuple[str, str]] = {
 # Panel columns (besides the fips/postal/name/year keys).
 COLUMNS = [
     # socioeconomic + migration spine (v1)
-    "population", "median_hh_income", "foreign_born_pct",
+    "population", "median_hh_income", "foreign_born_pct", "aid_pct",
     "unemployment_rate", "net_domestic_migration", "net_international_migration",
     # health: NCHS age-adjusted death rates per 100k (v2)
     "mortality_all", "cancer_death_rate", "heart_death_rate",
@@ -167,14 +167,18 @@ def _num(v) -> float | None:
 
 
 def fetch_acs() -> dict[tuple[str, int], dict]:
-    """{(fips, year): {population, median_hh_income, foreign_born_pct}} from ACS 1-yr."""
+    """{(fips, year): {population, median_hh_income, foreign_born_pct, aid_pct}} from ACS 1-yr.
+
+    aid_pct = share of households receiving public assistance income OR Food
+    Stamps/SNAP (table B19058) — a broad "government aid" measure.
+    """
     _require_requests()
     key = _census_key()
     out: dict[tuple[str, int], dict] = {}
     for year in ACS_YEARS:
         url = f"{CENSUS_BASE}/{year}/acs/acs1"
         params = {
-            "get": "B01003_001E,B19013_001E,B05002_001E,B05002_013E",
+            "get": "B01003_001E,B19013_001E,B05002_001E,B05002_013E,B19058_001E,B19058_002E",
             "for": "state:*", "key": key,
         }
         try:
@@ -195,10 +199,13 @@ def fetch_acs() -> dict[tuple[str, int], dict]:
             pop = _num(row[idx["B01003_001E"]])
             fb = _num(row[idx["B05002_013E"]])
             tot = _num(row[idx["B05002_001E"]])
+            aid = _num(row[idx["B19058_002E"]]) if "B19058_002E" in idx else None
+            hh = _num(row[idx["B19058_001E"]]) if "B19058_001E" in idx else None
             out[(fips, year)] = {
                 "population": pop,
                 "median_hh_income": _num(row[idx["B19013_001E"]]),
                 "foreign_born_pct": (round(fb / tot * 100, 2) if fb is not None and tot else None),
+                "aid_pct": (round(aid / hh * 100, 2) if aid is not None and hh else None),
             }
         logger.info("ACS %s: %d states", year, len(data))
     return out
