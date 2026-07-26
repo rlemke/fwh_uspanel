@@ -1,7 +1,7 @@
 """Backend-aware paths for the uspanel cache + outputs.
 
 On the fleet (``FW_STORAGE=s3`` / ``FW_DATA_ROOT=s3://afl-cache``) artifacts —
-the cached UCDP aggregate + world geometry + the rendered map HTML — land in the
+the cached Census ACS/PEP + BLS series + the assembled state-year panel — land in the
 shared MinIO object store. A thin wrapper over ``facetwork.runtime.storage`` (the
 same shape census-us / save-earth use), so terminal use and fleet runs share one
 cache rooted at ``$FW_DATA_ROOT/cache/uspanel/``.
