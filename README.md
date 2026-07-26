@@ -9,6 +9,21 @@ year)`, and caches one tidy table as **CSV + JSON** with a per-column coverage
 report. No charts or models yet — this is the dataset you look at *before*
 deciding the analysis.
 
+## Feature specifications
+
+Per-feature specs live in [`docs/`](docs/README.md) — how each feature works, what
+it fetches, its facets/workflows, and its cache/output:
+
+| Spec | What it covers |
+|------|----------------|
+| [Panel Build](docs/panel-build.md) | **Flagship.** `BuildPanel`: eight sources -> outer-join on `(state, year)` -> tidy CSV/JSON + coverage report. |
+| [Findings Analysis](docs/findings-analysis.md) | `BuildFindings`: within-state fixed-effects vs levels, state-clustered bootstrap, findings HTML page. |
+| [Data Sources](docs/data-sources.md) | The eight public feeds (ACS, BLS, PEP, NCHS, AtlasPlus HIV, CDC COVID, county elections, SEC DERA) — endpoints, coverage, quirks. |
+| [Storage & Cache](docs/storage-cache.md) | Backend-aware paths (local vs MinIO/S3), the BLS + DERA per-source caches. |
+| [Domain & Handlers](docs/domain-handlers.md) | `facetwork.domains` registration, dispatch wiring, task-list routing. |
+
+Index: [`docs/README.md`](docs/README.md).
+
 ## v1 columns + sources (all verified clean-API)
 
 | column | source | coverage |
