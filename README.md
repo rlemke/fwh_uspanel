@@ -9,6 +9,45 @@ year)`, and caches one tidy table as **CSV + JSON** with a per-column coverage
 report. No charts or models yet — this is the dataset you look at *before*
 deciding the analysis.
 
+## FFL at a glance
+
+The domain is driven from [FFL](https://github.com/rlemke/facetwork/blob/main/docs/reference/language/grammar.md),
+Facetwork's workflow language. A step is `name = Facet(args)`; ordering comes from
+**references**, not line order — here a `when` gate runs the analysis only once the
+panel reports enough rows:
+
+```ffl
+namespace my.uspanel {
+
+    use uspanel.data
+
+    /** Build the panel, then the findings page — only if the panel is complete. */
+    workflow OrderedPanelRun(force: Boolean = false, min_rows: Int = 500) => (status: String, html_path: String) andThen {
+
+        panel = uspanel.data.BuildPanel(force = $.force) andThen when {
+            case $.n_rows >= $$.min_rows => {
+                findings = uspanel.data.BuildFindings(force = $$.force)
+                yield OrderedPanelRun(status = "completed", html_path = findings.html_path)
+            }
+            case _ => {
+                yield OrderedPanelRun(status = "panel_too_thin", html_path = "")
+            }
+        }
+    }
+}
+```
+
+```bash
+fw ffl run --primary my.ffl --library src/uspanel/ffl/uspanel.ffl \
+  --workflow my.uspanel.OrderedPanelRun
+```
+
+📖 **[docs/ffl-examples.md](docs/ffl-examples.md)** — the full example gallery:
+the two-stage ingest/analysis split, why line order is not run order, call-time
+mixins (timeout/retry), `catch` for a missing `CENSUS_API_KEY`, wrapping the
+shipped workflows, and publishing the findings page. Every snippet there is
+compile-checked.
+
 ## Feature specifications
 
 Per-feature specs live in [`docs/`](docs/README.md) — how each feature works, what

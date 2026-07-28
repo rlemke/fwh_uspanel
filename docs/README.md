@@ -32,6 +32,7 @@ CSV/JSON panel with a coverage report; everything else builds on it.
 |------|----------------|
 | [storage-cache.md](storage-cache.md) | The backend-aware storage layer: `cache_root` / `output_root`, local vs MinIO/S3, stage-then-finalize remote writes, the BLS + DERA per-source caches. |
 | [domain-handlers.md](domain-handlers.md) | Domain registration (`facetwork.domains` entry point, `DomainPackage`), the `_DISPATCH` map, RegistryRunner vs poller wiring, task-list routing. |
+| [ffl-examples.md](ffl-examples.md) | **Usage patterns.** A gallery of complete, compile-checked FFL examples over these facets — the two-stage panel/findings split, reference-driven ordering, mixins, `catch`, `when` coverage gates, cross-domain publish. |
 
 ---
 
