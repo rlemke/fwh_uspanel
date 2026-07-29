@@ -80,10 +80,31 @@ references are always `step.field`; `$.force` reads the workflow's parameter.
 
 ## 3. Make the order explicit
 
-Ordering in FFL comes from **references**, not from layout. `BuildFindings` takes
-no `dependency_signal` parameter, so express the order by branching off a value the
-first step returns — here with a `when` that only runs the analysis once the panel
-reports rows:
+Ordering in FFL comes from **references**, not from layout. `BuildFindings` reads
+the panel from the cache rather than taking it as a value, so the compiler cannot
+see the dependency — state it with `after`:
+
+```ffl
+namespace my.uspanel {
+
+    use uspanel.data
+
+    /** Panel, then analysis — ordered by `after`, not by a value. */
+    workflow OrderedPanel(force: Boolean = false) => (status: String, html_path: String) andThen {
+
+        panel = uspanel.data.BuildPanel(force = $.force)
+
+        findings = uspanel.data.BuildFindings(force = $.force) after panel
+
+        yield OrderedPanel(status = "completed", html_path = findings.html_path)
+    }
+}
+```
+
+Use `after` whenever the link runs through a cache, object store or scratch dir and
+no value flows. If you want the second step to run *conditionally* as well as in
+order, gate it with a `when` on a value the first step returns — here the analysis
+runs only once the panel reports enough rows:
 
 ```ffl
 namespace my.uspanel {
