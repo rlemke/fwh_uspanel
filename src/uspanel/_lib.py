@@ -74,7 +74,9 @@ ELECTION_YEARS = [2008, 2012, 2016, 2020, 2024]
 DERA_BASE = "https://www.sec.gov/files/dera/data/financial-statement-data-sets"
 DERA_QUARTER = "q2"  # Q2 catches most annual (10-K) filers
 HQ_YEARS = list(range(2010, 2018))  # panel-overlap window; moves detectable 2011-2017
-SEC_UA = "facetwork research ralph_lemke@hotmail.com"
+# SEC blocks generic user agents and asks for a real contact ("Name email") --
+# a PERSON's address, so it is configuration, never a literal in the repo.
+SEC_UA_ENV = "SEC_USER_AGENT"
 
 ACS_YEARS = [y for y in range(2005, 2024) if y != 2020]  # no 2020 1-yr release
 BLS_YEARS = list(range(2005, 2025))
@@ -145,6 +147,16 @@ def _census_key() -> str:
             "ACS/PEP query endpoints (source it from ~/.facetwork/fleet-secrets.env)."
         )
     return key
+
+
+def _sec_user_agent() -> str:
+    ua = os.environ.get(SEC_UA_ENV, "").strip()
+    if not ua:
+        raise RuntimeError(
+            f"{SEC_UA_ENV} is not set -- SEC requires a User-Agent naming a contact, "
+            'e.g. "Your Org you@example.org" (source it from ~/.facetwork/fleet-secrets.env).'
+        )
+    return ua
 
 
 def _num(v) -> float | None:
@@ -496,8 +508,9 @@ def _hq_states_for_year(year: int) -> dict[str, str]:
         except Exception:  # noqa: BLE001
             pass
     url = f"{DERA_BASE}/{year}{DERA_QUARTER}.zip"
+    ua = _sec_user_agent()  # outside the try: a missing contact is a config error, not a "fetch failed"
     try:
-        content = requests.get(url, headers={"User-Agent": SEC_UA}, timeout=(30, 240)).content
+        content = requests.get(url, headers={"User-Agent": ua}, timeout=(30, 240)).content
         with _zip.ZipFile(_io.BytesIO(content)) as zf:
             text = zf.read("sub.txt").decode("latin-1")
     except Exception as exc:  # noqa: BLE001

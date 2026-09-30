@@ -46,7 +46,7 @@ batching within the one task, not fleet fan-out. See
 | 5 | **CDC AtlasPlus HIV** (`fetch_hiv_diagnoses`) | undocumented JSON backend `gis.cdc.gov/grasp/AtlasPlus` — `getInitData/00` + `qtOutputData` POST, transmission id `801` ("all categories") | 2008+ | keyless (browser-UA spoof) | `hiv_diagnosis_rate` (count → /100k) |
 | 6 | **CDC Provisional COVID Deaths** (`fetch_covid_deaths`) | Socrata `data.cdc.gov/resource/r8kw-7aab.json`, `group='By Year'` | 2020+ | keyless | `covid_death_rate` (count → /100k) |
 | 7 | **County election returns** (`fetch_partisan_lean`) | tonmcg GitHub CSVs (`US_County_Level_...Results`), 2008/2012/2016 wide + 2020/2024 per-year | forward-filled 2005–2024 | keyless | `dem_pres_share` (2-party Dem % ) |
-| 8 | **SEC DERA financial statements** (`fetch_hq_migration`) | `sec.gov/files/dera/data/financial-statement-data-sets/{year}q2.zip` → `sub.txt` → `stprba` business-address state | 2010–2017 | keyless (`SEC_UA` required) | `corp_hq_count`, `corp_hq_net` |
+| 8 | **SEC DERA financial statements** (`fetch_hq_migration`) | `sec.gov/files/dera/data/financial-statement-data-sets/{year}q2.zip` → `sub.txt` → `stprba` business-address state | 2010–2017 | keyless (`SEC_USER_AGENT` required) | `corp_hq_count`, `corp_hq_net` |
 
 Per-source detail worth knowing:
 
@@ -113,8 +113,11 @@ No facet of its own — these functions are the **implementation** behind
 - **HIV/COVID are counts converted to per-100k** using ACS population with a
   nearest-year fallback — a 2020 COVID rate borrows the closest ACS population year
   because there is no 2020 1-year release.
-- **SEC needs a real UA with contact info** (`SEC_UA = "facetwork research
-  ralph_lemke@hotmail.com"`) — SEC blocks generic user agents.
+- **SEC needs a real UA with contact info** — set `SEC_USER_AGENT` (e.g.
+  `"Your Org you@example.org"`, alongside `CENSUS_API_KEY` in
+  `~/.facetwork/fleet-secrets.env`). SEC blocks generic user agents, and the
+  contact is a person's address, so it is configuration, never committed. A
+  year already in the cache needs no request and so no user agent.
 - **Numeric hygiene lives in `_num`** — the ACS suppression sentinel
   (`≤ -666666666`) must be nulled, or it would poison every ACS-derived column; keep
   legitimate negatives (out-migration) intact (tested in
