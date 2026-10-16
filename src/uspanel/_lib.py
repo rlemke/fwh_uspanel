@@ -256,6 +256,53 @@ def _save_bls_cache(data: dict[tuple[str, int], float]) -> None:
         json.dump(raw, f)
 
 
+# BLS LAUS bulk flat file: every state's monthly SA unemployment rate, keyless
+# and with no daily quota (the API's keyless quota is ~25 requests/day/IP, which a
+# few retries exhaust). download.bls.gov refuses generic User-Agents with a 403
+# and asks for a contact UA, the same policy as SEC EDGAR, so it reuses
+# SEC_USER_AGENT (or BLS_USER_AGENT) and is skipped without one.
+BLS_LA_BULK = os.environ.get(
+    "FW_BLS_LA_BULK_URL", "https://download.bls.gov/pub/time.series/la/la.data.3.AllStatesS")
+
+
+def parse_bls_la_bulk(text: str) -> dict[tuple[str, int], float]:
+    """{(fips, year): annual mean SA unemployment rate} from la.data.3.AllStatesS.
+
+    Only complete years (all 12 months) are kept: a partial current year
+    averaged over the months published so far is not an annual figure.
+    """
+    want = {f"LASST{fips}0000000000003": fips for fips in STATES}
+    months: dict[tuple[str, int], list[float]] = {}
+    for line in text.splitlines():
+        parts = [p.strip() for p in line.split("\t")]
+        if len(parts) < 4 or parts[0] not in want:
+            continue
+        period = parts[2]
+        if not (period.startswith("M") and period != "M13"):
+            continue
+        v = _num(parts[3])
+        try:
+            yr = int(parts[1])
+        except ValueError:
+            continue
+        if v is not None and BLS_YEARS[0] <= yr <= BLS_YEARS[-1]:
+            months.setdefault((want[parts[0]], yr), []).append(v)
+    return {k: round(sum(v) / len(v), 2) for k, v in months.items() if len(v) == 12}
+
+
+def _fetch_bls_bulk() -> dict[tuple[str, int], float]:
+    ua = (os.environ.get("BLS_USER_AGENT") or os.environ.get("SEC_USER_AGENT") or "").strip()
+    if not ua:
+        return {}
+    try:
+        r = requests.get(BLS_LA_BULK, headers={"User-Agent": ua}, timeout=(30, 300))
+        r.raise_for_status()
+        return parse_bls_la_bulk(r.text)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("BLS LAUS bulk file failed (%s); falling back to the API", exc)
+        return {}
+
+
 def fetch_bls_unemployment() -> dict[tuple[str, int], float]:
     """{(fips, year): annual mean unemployment rate} from BLS LAUS (statewide, SA).
 
@@ -267,6 +314,11 @@ def fetch_bls_unemployment() -> dict[tuple[str, int], float]:
     """
     _require_requests()
     cached = _load_bls_cache()
+    bulk = _fetch_bls_bulk()
+    if bulk:
+        _save_bls_cache({**cached, **bulk})
+        logger.info("BLS unemployment: %d state-years (bulk file)", len(bulk))
+        return {**cached, **bulk}
     series_to_fips = {f"LASST{fips}0000000000003": fips for fips in STATES}
     ids = list(series_to_fips)
     key = os.environ.get("BLS_API_KEY", "").strip()
@@ -307,9 +359,13 @@ def fetch_bls_unemployment() -> dict[tuple[str, int], float]:
                     if (fips, yr) not in out and vals:  # prefer M13 if it was present
                         out[(fips, yr)] = round(sum(vals) / len(vals), 2)
     if out:
-        _save_bls_cache(out)  # refresh the cache on a good fetch
-        logger.info("BLS unemployment: %d state-years (fetched)", len(out))
-        return out
+        # MERGE: when the quota runs out mid-fetch only some chunks succeed, and
+        # saving just those overwrote a 51-state cache with 25 states (2026-10-16).
+        merged = {**cached, **out}
+        _save_bls_cache(merged)
+        logger.info("BLS unemployment: %d state-years fetched, %d with cache",
+                    len(out), len(merged))
+        return merged
     if cached:
         logger.warning("BLS live fetch empty (quota?) — using %d cached state-years", len(cached))
         return cached

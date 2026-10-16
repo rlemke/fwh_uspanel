@@ -14,7 +14,7 @@ so [panel-build](panel-build.md)'s outer-join can align them. This spec is the
 per-source contract — endpoint, exact fields/series IDs, coverage window, key
 requirement, and the specific quirk that makes each one finicky. All eight are
 grounded in `_lib.py`; the module constants (`CENSUS_BASE`, `BLS_V1`, `NCHS_SOCRATA`,
-`ATLASPLUS`, `COVID_SOCRATA`, `ELECTION_BASE`, `DERA_BASE`, …) name the endpoints.
+`BLS_LA_BULK`, `AIDSVU_DATASETS_URL`, `COVID_SOCRATA`, `ELECTION_BASE`, `DERA_BASE`, …) name the endpoints.
 
 ## How it works
 
@@ -40,7 +40,7 @@ batching within the one task, not fleet fan-out. See
 | # | Source (fn) | Endpoint / IDs | Coverage | Key? | Columns produced |
 |---|---|---|---|---|---|
 | 1 | **Census ACS 1-year** (`fetch_acs`) | `api.census.gov/data/{year}/acs/acs1`; tables `B01003_001E` (pop), `B19013_001E` (median hh income), `B05002_001E`/`_013E` (foreign-born %), `B19058_001E`/`_002E` (public-assistance/SNAP → `aid_pct`) | 2005–2023, **no 2020** 1-yr release | **CENSUS_API_KEY** | `population`, `median_hh_income`, `foreign_born_pct`, `aid_pct` |
-| 2 | **BLS LAUS** (`fetch_bls_unemployment`) | series `LASST<fips>0000000000003` (statewide, seasonally adjusted); v1 keyless or v2 with `BLS_API_KEY` | 2005–2024 | optional `BLS_API_KEY` | `unemployment_rate` |
+| 2 | **BLS LAUS** (`fetch_bls_unemployment`) | series `LASST<fips>0000000000003` (statewide, seasonally adjusted). FIRST the keyless bulk file `la.data.3.AllStatesS` (no quota; needs a contact UA — `BLS_USER_AGENT` or `SEC_USER_AGENT`, else 403), then the API: v1 keyless (~25 req/day/IP) or v2 with `BLS_API_KEY` | 2005–2024 | optional `BLS_API_KEY` | `unemployment_rate` |
 | 3 | **Census PEP components** (`fetch_pep_migration`) | `api.census.gov/data/2019/pep/components`; `DOMESTICMIG`, `INTERNATIONALMIG`, `PERIOD_CODE` | **2010–2019** (vintage-2019 window) | **CENSUS_API_KEY** | `net_domestic_migration`, `net_international_migration` |
 | 4 | **NCHS Leading Causes of Death** (`fetch_nchs_mortality`) | Socrata `data.cdc.gov/resource/bi63-dtpu.json`; `aadr` (age-adjusted rate /100k) for the 6 causes in `NCHS_CAUSES` | 1999–2017 | keyless | `mortality_all`, `cancer_death_rate`, `heart_death_rate`, `flu_pneumonia_death_rate`, `diabetes_death_rate`, `stroke_death_rate` |
 | 5 | **AIDSVu HIV** (`fetch_hiv_diagnoses`) | AIDSVu (Emory) per-year `AIDSVu_State_NewDX_<year>-<pubdate>.xlsx` workbooks, URLs scraped from the datasets page; column `New Diagnoses State Cases`. Replaced CDC AtlasPlus, whose backend has 404'd since 2026-08-25 | 2008+ | keyless | `hiv_diagnosis_rate` (count → /100k) |
@@ -53,8 +53,8 @@ Per-source detail worth knowing:
 - **ACS** — `foreign_born_pct = B05002_013E / B05002_001E × 100`; `aid_pct =
   B19058_002E / B19058_001E × 100` (households on public assistance **or** SNAP). Skips
   any year that returns non-200 (e.g. the missing 2020 release) rather than failing.
-- **BLS** — prefers the `M13` annual-average period if present, else the mean of the
-  12 monthly `M##` values. Chunks requests to respect the keyless v1 limits.
+- **BLS** — bulk file: mean of the 12 monthly values, complete years only (the SA
+  series has no `M13`). API: prefers `M13` if present, else the monthly mean. Chunks requests to respect the keyless v1 limits.
 - **PEP** — decodes the vintage-2019 `PERIOD_CODE` as `year = 2009 + code` (1→2010 …
   10→2019) and discards anything outside 2010–2019. This is the **only** clean-API
   migration window; 2020+ (bulk CSV) and 2000–2009 (intercensal) are documented
@@ -92,10 +92,10 @@ No facet of its own — these functions are the **implementation** behind
 
 ## Cache / output
 
-- **BLS** — `bls-unemployment.json` under `storage.cache_root()`. Written on every
-  good fetch and **reused when a live fetch comes back empty** (quota exhaustion), so a
-  throttled rebuild keeps the last good series instead of dropping unemployment
-  entirely (`_load_bls_cache` / `_save_bls_cache`).
+- **BLS** — `bls-unemployment.json` under `storage.cache_root()`. New data is
+  **merged into** it, never written over it: a quota that runs out mid-fetch leaves
+  only some chunks, and saving those alone once shrank the cache from 51 states to 25.
+  Reused when a live fetch comes back empty (`_load_bls_cache` / `_save_bls_cache`).
 - **SEC DERA** — `hq-{year}.json` per year under `cache_root()`. A past quarter's data
   is **immutable**, so the cache is authoritative and the ~96 MB zip is downloaded once
   per year.
