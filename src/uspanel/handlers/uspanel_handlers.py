@@ -54,10 +54,18 @@ def handle(payload: dict) -> dict:
     return handler(payload)
 
 
+#: Both facets call the Census API and SEC EDGAR. Declared on the registration
+#: so a runner without them does not advertise the facets and never claims the
+#: task (facetwork ``registration_env_missing``) -- measured 2026-10-16: an
+#: unscoped runner with no secrets claimed BuildFindings until it dead-lettered.
+REQUIRES_ENV = ["CENSUS_API_KEY", "SEC_USER_AGENT"]
+
+
 def register_handlers(runner) -> None:
     for facet_name in _DISPATCH:
         runner.register_handler(facet_name=facet_name,
-            module_uri=f"file://{os.path.abspath(__file__)}", entrypoint="handle")
+            module_uri=f"file://{os.path.abspath(__file__)}", entrypoint="handle",
+            metadata={"requires_env": REQUIRES_ENV})
 
 
 def register_poller(poller) -> None:
