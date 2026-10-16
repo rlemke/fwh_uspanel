@@ -57,7 +57,7 @@ it fetches, its facets/workflows, and its cache/output:
 |------|----------------|
 | [Panel Build](docs/panel-build.md) | **Flagship.** `BuildPanel`: eight sources -> outer-join on `(state, year)` -> tidy CSV/JSON + coverage report. |
 | [Findings Analysis](docs/findings-analysis.md) | `BuildFindings`: within-state fixed-effects vs levels, state-clustered bootstrap, findings HTML page. |
-| [Data Sources](docs/data-sources.md) | The eight public feeds (ACS, BLS, PEP, NCHS, AtlasPlus HIV, CDC COVID, county elections, SEC DERA) — endpoints, coverage, quirks. |
+| [Data Sources](docs/data-sources.md) | The eight public feeds (ACS, BLS, PEP, NCHS, AIDSVu HIV, CDC COVID, county elections, SEC DERA) — endpoints, coverage, quirks. |
 | [Storage & Cache](docs/storage-cache.md) | Backend-aware paths (local vs MinIO/S3), the BLS + DERA per-source caches. |
 | [Domain & Handlers](docs/domain-handlers.md) | `facetwork.domains` registration, dispatch wiring, task-list routing. |
 
@@ -89,8 +89,8 @@ lowest — the known health-disparity pattern.
   CSV) and 2000–2009 (intercensal) are a documented fast-follow.
 - **Health columns (v2, added)** — NCHS age-adjusted death rates by state, 1999–2017
   (cancer, heart, influenza/pneumonia, diabetes, stroke, all-cause). Still open:
-  **HIV** (CDC AtlasPlus, 2008+ — only a finicky undocumented backend, no clean
-  Socrata) and **COVID** (CDC's by-state Socrata was retired; 2020+ is off the
+  **HIV** (AIDSVu's republication of CDC surveillance, 2008+; CDC's AtlasPlus
+  backend was withdrawn 2026-08-25) and **COVID** (CDC's by-state Socrata was retired; 2020+ is off the
   2010–2017 analyzable window anyway) — both targeted fast-follows.
 - Country-level → **state-level panel** is deliberate: analyzing the US as one
   50-year time series is a spurious-trend trap; 50 states × years with state/year

@@ -76,7 +76,7 @@ lookups sources key by).
 |---|---|---|
 | Socioeconomic + migration (v1 spine) | `population`, `median_hh_income`, `foreign_born_pct`, `aid_pct`, `unemployment_rate`, `net_domestic_migration`, `net_international_migration` | ACS, BLS, PEP — [data-sources](data-sources.md) |
 | Health (age-adjusted death rate /100k) | `mortality_all`, `cancer_death_rate`, `heart_death_rate`, `flu_pneumonia_death_rate`, `diabetes_death_rate`, `stroke_death_rate` | NCHS |
-| Health (rate /100k) | `hiv_diagnosis_rate`, `covid_death_rate` | AtlasPlus, CDC COVID |
+| Health (rate /100k) | `hiv_diagnosis_rate`, `covid_death_rate` | AIDSVu, CDC COVID |
 | Political | `dem_pres_share` | county-election returns |
 | Corporate | `corp_hq_count`, `corp_hq_net` | SEC DERA |
 

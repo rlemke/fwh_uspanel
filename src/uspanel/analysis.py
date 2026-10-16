@@ -364,6 +364,16 @@ def build_findings(*, force: bool = False) -> FindingsResult:
     with cstore.open_read(panel.json_path) as f:
         blob = json.load(f)
     res = analyze(blob["rows"])
+    if not res["matrix"]:
+        # Too few complete-case rows: some variable is missing everywhere, which
+        # means a source failed upstream. Name it rather than publish an empty page.
+        rows = [r for r in blob["rows"] if r.get("year") in ANALYSIS_YEARS]
+        absent = [v for v in VARS
+                  if all(math.isnan(_row_vars(r)[v]) for r in rows)]
+        raise RuntimeError(
+            f"findings need complete {min(ANALYSIS_YEARS)}-{max(ANALYSIS_YEARS)} rows; got "
+            f"{res['n_rows']}. No data at all for: {', '.join(absent) or 'none'} "
+            "(a source fetch failed - see the BuildPanel log)")
     html = render_findings_html(res)
     html_path = cstore.join(cstore.output_root(), "findings", "index.html")
     with cstore.open_write(html_path, "w") as f:

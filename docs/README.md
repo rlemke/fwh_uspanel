@@ -24,7 +24,7 @@ CSV/JSON panel with a coverage report; everything else builds on it.
 
 | Spec | What it covers |
 |------|----------------|
-| [data-sources.md](data-sources.md) | The eight public feeds (Census ACS, BLS LAUS, Census PEP, NCHS mortality, CDC AtlasPlus HIV, CDC COVID, county election returns, SEC DERA HQs) — endpoints, series IDs, coverage windows, key requirements, and per-source quirks. |
+| [data-sources.md](data-sources.md) | The eight public feeds (Census ACS, BLS LAUS, Census PEP, NCHS mortality, AIDSVu HIV, CDC COVID, county election returns, SEC DERA HQs) — endpoints, series IDs, coverage windows, key requirements, and per-source quirks. |
 
 ## Infrastructure
 

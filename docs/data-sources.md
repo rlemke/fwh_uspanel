@@ -43,7 +43,7 @@ batching within the one task, not fleet fan-out. See
 | 2 | **BLS LAUS** (`fetch_bls_unemployment`) | series `LASST<fips>0000000000003` (statewide, seasonally adjusted); v1 keyless or v2 with `BLS_API_KEY` | 2005–2024 | optional `BLS_API_KEY` | `unemployment_rate` |
 | 3 | **Census PEP components** (`fetch_pep_migration`) | `api.census.gov/data/2019/pep/components`; `DOMESTICMIG`, `INTERNATIONALMIG`, `PERIOD_CODE` | **2010–2019** (vintage-2019 window) | **CENSUS_API_KEY** | `net_domestic_migration`, `net_international_migration` |
 | 4 | **NCHS Leading Causes of Death** (`fetch_nchs_mortality`) | Socrata `data.cdc.gov/resource/bi63-dtpu.json`; `aadr` (age-adjusted rate /100k) for the 6 causes in `NCHS_CAUSES` | 1999–2017 | keyless | `mortality_all`, `cancer_death_rate`, `heart_death_rate`, `flu_pneumonia_death_rate`, `diabetes_death_rate`, `stroke_death_rate` |
-| 5 | **CDC AtlasPlus HIV** (`fetch_hiv_diagnoses`) | undocumented JSON backend `gis.cdc.gov/grasp/AtlasPlus` — `getInitData/00` + `qtOutputData` POST, transmission id `801` ("all categories") | 2008+ | keyless (browser-UA spoof) | `hiv_diagnosis_rate` (count → /100k) |
+| 5 | **AIDSVu HIV** (`fetch_hiv_diagnoses`) | AIDSVu (Emory) per-year `AIDSVu_State_NewDX_<year>-<pubdate>.xlsx` workbooks, URLs scraped from the datasets page; column `New Diagnoses State Cases`. Replaced CDC AtlasPlus, whose backend has 404'd since 2026-08-25 | 2008+ | keyless | `hiv_diagnosis_rate` (count → /100k) |
 | 6 | **CDC Provisional COVID Deaths** (`fetch_covid_deaths`) | Socrata `data.cdc.gov/resource/r8kw-7aab.json`, `group='By Year'` | 2020+ | keyless | `covid_death_rate` (count → /100k) |
 | 7 | **County election returns** (`fetch_partisan_lean`) | tonmcg GitHub CSVs (`US_County_Level_...Results`), 2008/2012/2016 wide + 2020/2024 per-year | forward-filled 2005–2024 | keyless | `dem_pres_share` (2-party Dem % ) |
 | 8 | **SEC DERA financial statements** (`fetch_hq_migration`) | `sec.gov/files/dera/data/financial-statement-data-sets/{year}q2.zip` → `sub.txt` → `stprba` business-address state | 2010–2017 | keyless (`SEC_USER_AGENT` required) | `corp_hq_count`, `corp_hq_net` |
@@ -62,9 +62,11 @@ Per-source detail worth knowing:
 - **NCHS** — `aadr` (age-adjusted death rate) is deliberately chosen over raw counts
   to remove the age-structure confound; `_NAME_TO_FIPS` drops the "United States" row
   and territories.
-- **HIV** — spoofs a browser UA + `X-Requested-With` header against the AtlasPlus XHR
-  backend; parses `sourcedata` rows positionally (`r[9]` = value, `r[2]` = geo id,
-  `r[1]` = year id). Fragile by nature — hence fail-soft.
+- **HIV** — scrapes the workbook URLs from AIDSVu's datasets page (filenames carry a
+  publication datestamp, so a constructed URL breaks on the next republish), reads
+  sheet `Data`, header located by content. `GEO ID` is the UNPADDED state FIPS, not
+  an index; suppressed cells are skipped, never read as 0. Fail-soft for the panel —
+  but `BuildFindings` refuses to render when any analysis variable is empty everywhere.
 - **Partisan lean** — sums county `dem`/`gop` votes to a state 2-party Democratic
   share per election, then assigns each panel year the **most recent election at or
   before it** (a slow-moving lean). **Alaska is absent** from the county source for
@@ -79,7 +81,7 @@ Per-source detail worth knowing:
 - **`requests`** (pip) — all eight fetchers; `_require_requests()` raises a clear
   error if it is unimportable.
 - **stdlib** — `csv` + `io` (election + DERA parsing), `zipfile` (DERA `sub.txt`
-  extraction), `json` (AtlasPlus POST body + caches).
+  extraction), `json` (caches); `openpyxl` reads the AIDSVu workbooks.
 - **No binaries, no numpy** — this module is HTTP + dict assembly only.
 
 ## Facets & workflows
@@ -106,10 +108,10 @@ No facet of its own — these functions are the **implementation** behind
   those columns / the build); HIV/COVID/partisan/HQ swallow exceptions and return
   `{}`. So a network blip silently *shrinks* the panel for the fragile sources but
   *breaks* it for Census — different failure modes to reason about.
-- **The undocumented AtlasPlus + retired COVID Socrata are the brittle two.** The
-  README flags HIV (AtlasPlus, "finicky undocumented backend") and COVID (CDC by-state
-  Socrata was retired) as the least stable feeds; treat empty HIV/COVID columns as
-  expected, not a regression.
+- **HIV and the retired COVID Socrata are the brittle two.** HIV already lost one source
+  (CDC AtlasPlus 404s since 2026-08-25; now AIDSVu). An empty HIV column is a
+  REGRESSION — `BuildFindings` fails naming the empty variable rather than publishing a
+  page with no correlation matrix. COVID is outside the 2010–2017 window, so empty is expected there.
 - **HIV/COVID are counts converted to per-100k** using ACS population with a
   nearest-year fallback — a 2020 COVID rate borrows the closest ACS population year
   because there is no 2020 1-year release.

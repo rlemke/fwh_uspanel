@@ -18,15 +18,17 @@ Sources (v1, all verified clean-API):
 
 Honest coverage: the columns span different years (see the coverage report), so
 downstream analysis must handle the ragged panel. Health columns (cause-specific
-mortality via CDC WONDER, HIV via AtlasPlus, COVID/flu/RSV via NHSN) are the
+mortality via CDC WONDER, HIV via AIDSVu, COVID/flu/RSV via NHSN) are the
 planned v2 — this v1 is the socioeconomic + migration spine.
 """
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 
 from . import storage as cstore
@@ -52,13 +54,18 @@ NCHS_CAUSES = {
     "Diabetes": "diabetes_death_rate",
     "Stroke": "stroke_death_rate",
 }
-# CDC AtlasPlus (NCHHSTP) JSON backend — total new HIV diagnoses by state, 2008+.
-# tx id 801 = "All transmission categories". Undocumented endpoint (browser XHR).
-ATLASPLUS = "https://gis.cdc.gov/grasp/AtlasPlus"
+# HIV new diagnoses by state, 2008+. This read CDC NCHHSTP AtlasPlus's
+# undocumented JSON backend until CDC withdrew it (every path under
+# /grasp/AtlasPlus/ 404s since 2026-08-25). AIDSVu (Emory) republishes the same
+# CDC surveillance data as per-year state workbooks; fwh_health moved to it first.
+# ⚠️ Filenames carry a PUBLICATION datestamp (AIDSVu_State_NewDX_2023-20250726.xlsx),
+# so URLs are scraped from the datasets page, never constructed from the year.
+# ⚠️ "GEO ID" is the UNPADDED state FIPS (Arizona 4, Colorado 8), not an index.
+AIDSVU_DATASETS_URL = os.environ.get(
+    "FW_AIDSVU_DATASETS_URL", "https://aidsvu.org/resources/#/datasets")
+AIDSVU_TOTAL_COL = "New Diagnoses State Cases"
 _BROWSER_UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
-_ATLAS_HDRS = {**_BROWSER_UA, "Content-Type": "application/json; charset=UTF-8",
-               "Referer": ATLASPLUS + "/", "X-Requested-With": "XMLHttpRequest"}
 HIV_YEAR_FROM = 2008
 # CDC Provisional COVID-19 Deaths by state (Socrata), group="By Year", 2020+.
 COVID_SOCRATA = "https://data.cdc.gov/resource/r8kw-7aab.json"
@@ -111,7 +118,7 @@ COLUMNS = [
     # health: NCHS age-adjusted death rates per 100k (v2)
     "mortality_all", "cancer_death_rate", "heart_death_rate",
     "flu_pneumonia_death_rate", "diabetes_death_rate", "stroke_death_rate",
-    # HIV new diagnoses per 100k (AtlasPlus, 2008+) + COVID deaths per 100k (2020+)
+    # HIV new diagnoses per 100k (AIDSVu, 2008+) + COVID deaths per 100k (2020+)
     "hiv_diagnosis_rate", "covid_death_rate",
     # political: 2-party Democratic presidential vote share % (higher = bluer)
     "dem_pres_share",
@@ -373,37 +380,80 @@ def fetch_nchs_mortality() -> dict[tuple[str, int], dict]:
     return out
 
 
-def fetch_hiv_diagnoses() -> dict[tuple[str, int], int]:
-    """{(fips, year): total new HIV diagnoses} from CDC AtlasPlus (2008+).
+def _aidsvu_state_newdx_urls() -> dict[int, str]:
+    """year -> AIDSVu state new-diagnoses workbook URL, scraped from the datasets page."""
+    html = requests.get(AIDSVU_DATASETS_URL, headers=_BROWSER_UA, timeout=120).text
+    urls: dict[int, str] = {}
+    for u in re.findall(r'https?://[^\s"\'<>]+State_NewDX[^\s"\'<>]*\.xlsx', html, re.IGNORECASE):
+        m = re.search(r"State_NewDX_(\d{4})", u)
+        if m:
+            urls[int(m.group(1))] = u
+    if not urls:
+        raise RuntimeError(f"no AIDSVu State_NewDX workbooks found at {AIDSVU_DATASETS_URL} "
+                           "— the page layout or naming changed")
+    return urls
 
-    One getInitData catalog call + one qtOutputData POST for transmission id 801
-    ("All transmission categories"). Undocumented JSON backend, so failures
-    degrade to an empty dict rather than aborting the whole panel.
+
+def _aidsvu_int(v) -> int | None:
+    """Cell -> int, or None when blank/suppressed (withheld is not zero)."""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return int(v)
+    t = str(v).strip().replace(",", "")
+    return int(t) if t and t.lstrip("-").isdigit() else None
+
+
+def parse_aidsvu_workbook(blob: bytes, year: int) -> dict[tuple[str, int], int]:
+    """{(fips, year): total new HIV diagnoses} from one AIDSVu State_NewDX workbook."""
+    import openpyxl
+
+    wb = openpyxl.load_workbook(io.BytesIO(blob), read_only=True, data_only=True)
+    try:
+        ws = wb["Data"]
+        hdr_row, hdr = 0, []
+        for i, row in enumerate(ws.iter_rows(min_row=1, max_row=12, values_only=True), start=1):
+            vals = [str(c).replace("\n", " ").strip() if c is not None else "" for c in row]
+            if "Year" in vals and "State" in vals:
+                hdr_row, hdr = i, vals
+                break
+        if not hdr:
+            raise RuntimeError(f"AIDSVu {year}: no header row containing 'Year' and 'State'")
+        if AIDSVU_TOTAL_COL not in hdr or "GEO ID" not in hdr:
+            raise RuntimeError(f"AIDSVu {year}: missing '{AIDSVU_TOTAL_COL}' or 'GEO ID' column")
+        geo_i, yr_i, n_i = hdr.index("GEO ID"), hdr.index("Year"), hdr.index(AIDSVU_TOTAL_COL)
+        out: dict[tuple[str, int], int] = {}
+        for row in ws.iter_rows(min_row=hdr_row + 1, values_only=True):
+            try:
+                fips = f"{int(row[geo_i]):02d}"
+                yr = int(str(row[yr_i] or year).strip())
+            except (TypeError, ValueError):
+                continue
+            cases = _aidsvu_int(row[n_i])
+            if fips in STATES and cases is not None:
+                out[(fips, yr)] = cases
+        return out
+    finally:
+        wb.close()
+
+
+def fetch_hiv_diagnoses() -> dict[tuple[str, int], int]:
+    """{(fips, year): total new HIV diagnoses} from AIDSVu's state workbooks (2008+).
+
+    Degrades to an empty dict so the PANEL still builds; the findings page then
+    refuses to render without it (see ``analysis.build_findings``).
     """
     _require_requests()
-    try:
-        init = requests.get(f"{ATLASPLUS}/getInitData/00", headers=_BROWSER_UA, timeout=120).json()
-        vv = init["varvals"]
-        states = [v for v in vv if v.get("vtid") == 3 and v.get("geoLevel") == 1002 and v.get("fips")]
-        gid_fips = {s["id"]: s["fips"] for s in states}
-        years = {str(v["name"]): v["id"] for v in vv if v.get("vtid") == 2}
-        yid_year = {v["id"]: str(v["name"]) for v in vv if v.get("vtid") == 2}
-        ywanted = [y for y in (str(x) for x in range(HIV_YEAR_FROM, 2025)) if y in years]
-        vids = ",".join(["203"] + [str(s["id"]) for s in states]
-                        + [str(years[y]) for y in ywanted] + ["650", "551", "601", "801"])
-        rows = requests.post(f"{ATLASPLUS}/qtOutputData", data=json.dumps({"VariableIDs": vids}),
-                             headers=_ATLAS_HDRS, timeout=180).json().get("sourcedata") or []
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("AtlasPlus HIV fetch failed: %s", exc)
-        return {}
     out: dict[tuple[str, int], int] = {}
-    for r in rows:
-        if r[9] is None:
-            continue
-        fips, yr = gid_fips.get(r[2]), yid_year.get(r[1])
-        if fips in STATES and yr and yr.isdigit():
-            out[(fips, int(yr))] = int(r[9])
-    logger.info("HIV diagnoses: %d state-years (2008+)", len(out))
+    try:
+        urls = _aidsvu_state_newdx_urls()
+        for year in sorted(y for y in urls if y >= HIV_YEAR_FROM):
+            blob = requests.get(urls[year], headers=_BROWSER_UA, timeout=300).content
+            out.update(parse_aidsvu_workbook(blob, year))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("AIDSVu HIV fetch failed: %s", exc)
+        return {}
+    logger.info("HIV diagnoses: %d state-years (2008+, AIDSVu)", len(out))
     return out
 
 
