@@ -45,7 +45,7 @@ batching within the one task, not fleet fan-out. See
 | 4 | **NCHS Leading Causes of Death** (`fetch_nchs_mortality`) | Socrata `data.cdc.gov/resource/bi63-dtpu.json`; `aadr` (age-adjusted rate /100k) for the 6 causes in `NCHS_CAUSES` | 1999–2017 | keyless | `mortality_all`, `cancer_death_rate`, `heart_death_rate`, `flu_pneumonia_death_rate`, `diabetes_death_rate`, `stroke_death_rate` |
 | 5 | **AIDSVu HIV** (`fetch_hiv_diagnoses`) | AIDSVu (Emory) per-year `AIDSVu_State_NewDX_<year>-<pubdate>.xlsx` workbooks, URLs scraped from the datasets page; column `New Diagnoses State Cases`. Replaced CDC AtlasPlus, whose backend has 404'd since 2026-08-25 | 2008+ | keyless | `hiv_diagnosis_rate` (count → /100k) |
 | 6 | **CDC Provisional COVID Deaths** (`fetch_covid_deaths`) | Socrata `data.cdc.gov/resource/r8kw-7aab.json`, `group='By Year'` | 2020+ | keyless | `covid_death_rate` (count → /100k) |
-| 7 | **County election returns** (`fetch_partisan_lean`) | tonmcg GitHub CSVs (`US_County_Level_...Results`), 2008/2012/2016 wide + 2020/2024 per-year | forward-filled 2005–2024 | keyless | `dem_pres_share` (2-party Dem % ) |
+| 7 | **County election returns** (`fetch_partisan_lean`) | tonmcg GitHub CSVs (`US_County_Level_...Results`), 2008/2012/2016 wide + 2020/2024 per-year | 2008–2024 (each year takes the last election at or before it; nothing before 2008) | keyless | `dem_pres_share` (2-party Dem % ) |
 | 8 | **SEC DERA financial statements** (`fetch_hq_migration`) | `sec.gov/files/dera/data/financial-statement-data-sets/{year}q2.zip` → `sub.txt` → `stprba` business-address state | 2010–2017 | keyless (`SEC_USER_AGENT` required) | `corp_hq_count`, `corp_hq_net` |
 
 Per-source detail worth knowing:

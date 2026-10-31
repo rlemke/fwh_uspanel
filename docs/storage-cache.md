@@ -7,15 +7,17 @@
 ## Overview
 
 Every read/write in the domain goes through `src/uspanel/storage.py` — a thin
-backend-aware wrapper over `facetwork.runtime.storage` (the same shape census-us /
-save-earth use). It gives the panel one cache/output layout that works identically in
+shim over the shared `facetwork.domains.storage` (`domain_storage("uspanel")`,
+default `nested` layout), which in turn sits on `facetwork.runtime.storage`. The
+shim only keeps this package's import path and public names (including the
+private `_data_root` alias `_lib.py` calls). It gives the panel one cache/output layout that works identically in
 tests (a local `tmp_path`) and on the fleet (shared MinIO/S3), so handler code never
 branches on the backend. This is infrastructure, not a facet — it underpins
 [panel-build](panel-build.md) and [findings-analysis](findings-analysis.md).
 
 ## How it works
 
-`storage.py` resolves a **data root** and derives two namespaces under it:
+The shared layer resolves a **data root** and derives two namespaces under it:
 
 - `_data_root()` = `$FW_DATA_ROOT` or `facetwork.config.get_output_base()`.
 - `cache_root()` — `$FW_USPANEL_CACHE_DIR` override, else remote
@@ -24,12 +26,13 @@ branches on the backend. This is infrastructure, not a facet — it underpins
   `<root>/cache/uspanel/output`, else local `<root>/uspanel-output`.
 
 `is_remote(path)` keys on `"://"` in the path. Reads go through `localize()` (a
-no-op locally; `facetwork.runtime.storage.localize` pulls a remote object to a local
+no-op locally; the runtime's `localize` pulls a remote object to a local
 temp for reading). Writes use a context manager `open_write(path, mode)`:
 
 - **Local** — `os.makedirs` the parent, then a plain file handle.
-- **Remote** — write to a `tempfile.mkstemp` scratch file, then on close **finalize**
-  by streaming the temp bytes into `get_storage_backend(path).open(path, "wb")`. This
+- **Remote** — write to a `tempfile.mkstemp` scratch file, then on **clean** exit
+  stream the temp bytes into the backend (`backend(path).open(path, "wb")`); an
+  exception in the caller's body uploads nothing. This
   is the object-store "no partial writes" discipline: stage locally, commit whole.
 
 `exists()` / `join()` round out the helpers (`join` normalizes slashes so
@@ -54,15 +57,16 @@ Not a data source. The concrete paths it produces:
 | BLS series cache | `cache_root()` | `uspanel-cache/bls-unemployment.json` | `s3://afl-cache/cache/uspanel/cache/bls-unemployment.json` |
 | SEC HQ snapshot | `cache_root()` | `uspanel-cache/hq-<year>.json` | `.../cache/hq-<year>.json` |
 
-(Assumes `FW_DATA_ROOT=s3://afl-cache` on the fleet; the `cache/uspanel/` prefix is
-literal in `storage.py`.)
+(Assumes `FW_DATA_ROOT=s3://afl-cache` on the fleet; the `cache/uspanel/cache` shape
+is the shared layer's `nested` layout, pinned so the existing objects stay where they are.)
 
 ## External libraries / binaries
 
-- **`facetwork.runtime.storage`** — `get_storage_backend`, `localize`; the actual
-  S3/MinIO/local backend selection.
+- **`facetwork.domains.storage`** — the per-domain path convention + staged writes.
+- **`facetwork.runtime.storage`** — underneath it; the actual S3/MinIO/local backend
+  selection and `localize`.
 - **`facetwork.config.get_output_base`** — default root when `FW_DATA_ROOT` is unset.
-- **stdlib** — `os`, `tempfile`, `contextlib`. No third-party deps, no binaries.
+- No third-party deps of its own, no binaries.
 
 ## Cache / output
 
@@ -76,11 +80,6 @@ This spec *is* the cache/output layer. Two namespaces:
 
 ## Gotchas & notes
 
-- **Stale module docstring.** `storage.py`'s docstring describes "the cached UCDP
-  aggregate + world geometry + the rendered map HTML" — copy-pasted from the
-  `fwh_conflict` domain. This domain caches **no** UCDP data or map HTML; the code is
-  correct and domain-agnostic, only the prose is wrong. Do not trust the docstring's
-  artifact list; trust `cache_root()` / `output_root()`.
 - **Remote writes are stage-then-finalize.** A crash mid-write leaves the temp file,
   not a truncated object — but also means the object appears only on clean close. Keep
   scratch local (the temp dir) as the deployment docs require.

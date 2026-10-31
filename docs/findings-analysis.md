@@ -105,8 +105,9 @@ n_rows, n_states}`, logging a success/error `_step_log` line.
 - **Complete-case only.** `analyze` keeps a row only if **all 12** `VARS` are present,
   so the effective analysis window is the narrow overlap where econ + migration +
   health + politics + HQ coexist (README: 2010-2017, ~400 state-years). Sparse live
-  coverage can shrink this below the `< len(VARS)+2` guard, which returns an
-  empty-result page rather than crashing.
+  coverage can shrink this below the `< len(VARS)+2` guard; `build_findings` then
+  **raises**, naming every variable that has no data at all in the window (a source
+  failed upstream), rather than publishing a page with no correlation matrix.
 - **Reproducible by seed.** The bootstrap RNG is seeded (`12345`); re-running on the
   same panel yields the identical page — intentional, so the published numbers are
   stable.

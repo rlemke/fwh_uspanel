@@ -87,6 +87,11 @@ None of its own. Registration writes nothing; the handlers' artifacts are covere
 - **`MAPS = "uspanel.data"`** in `uspanel_handlers.py` is just the namespace prefix
   string used to build the two dispatch keys — the name is a carryover convention (map
   domains use it), not a claim that this domain renders maps.
+- **`REQUIRES_ENV = ["CENSUS_API_KEY", "SEC_USER_AGENT"]`** is passed as
+  `metadata={"requires_env": …}` on every registration, so a runner whose
+  environment lacks either does not advertise the facets and never claims them.
+  Measured 2026-10-16: an unscoped runner with no secrets claimed `BuildFindings`
+  until it dead-lettered.
 - **No `runner_env`** is set on `DomainPackage`, so the domain inherits the default
   runner resilience timeouts. `BuildPanel` declares `Timeout(minutes=15)` in FFL; a
   slow all-source fetch should complete well within that.

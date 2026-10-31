@@ -241,8 +241,10 @@ namespace my.uspanel {
 }
 ```
 
-Compile that one with `--library ~/fw_handlers/fwh_census_us/src/census_us/ffl/census.ffl`
-as well.
+Compile that one with the census publisher's FFL as well:
+`--library ~/fw_handlers/fwh_census_us/src/census_us/handlers/publish/ffl/census_publish.ffl
+--library ~/fw_handlers/fwh_census_us/src/census_us/handlers/downloads/ffl/census_operations.ffl`
+(the second supplies the `census.types` it uses).
 
 ---
 

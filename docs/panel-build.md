@@ -81,15 +81,15 @@ lookups sources key by).
 | Corporate | `corp_hq_count`, `corp_hq_net` | SEC DERA |
 
 Per-source coverage windows differ (ACS 2005–2023 no-2020, BLS 2005–2024, PEP
-2010–2019, NCHS 1999–2017, HIV 2008+, COVID 2020+, partisan 2005–2024, HQ 2010–2017)
+2010–2019, NCHS 1999–2017, HIV 2008+, COVID 2020+, partisan 2008–2024, HQ 2010–2017)
 — see [data-sources](data-sources.md) for the exact windows and why they differ.
 
 ## External libraries / binaries
 
 - **`requests`** (pip) — every source fetch. `build_panel` calls `_require_requests()`
   transitively via each fetcher.
-- **`facetwork.runtime.storage`** via `src/uspanel/storage.py` — backend-aware
-  read/write so the same code caches to a local dir in tests and to MinIO/S3 on the
+- **`facetwork.domains.storage`** via `src/uspanel/storage.py` (a thin shim) —
+  backend-aware read/write so the same code caches to a local dir in tests and to MinIO/S3 on the
   fleet.
 - **No binaries.** Pure-Python; no osmium/GDAL/Java. (`numpy` is a dependency but is
   used only by [findings-analysis](findings-analysis.md), not by `build_panel`.)
