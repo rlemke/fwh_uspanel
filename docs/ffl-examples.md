@@ -234,12 +234,15 @@ namespace my.uspanel {
             prefixes = ["uspanel/output"],
             dests = ["us/state-panel"],
             labels = ["US state-year panel findings"],
-            landing_title = "Facetwork maps")
+            landing_title = "Facetwork maps") after findings
 
         yield FindingsPublish(pages_url = published.pages_url)
     }
 }
 ```
+
+No value flows from `findings` into the publish (it reads the store), so
+`after findings` is what orders the publish behind the build.
 
 Compile that one with the census publisher's FFL as well:
 `--library ~/fw_handlers/fwh_census_us/src/census_us/handlers/publish/ffl/census_publish.ffl
